@@ -1,0 +1,10 @@
+[Unit]
+Description=Verifie qu'une sauvegarde Proton Drive a reussi recemment
+# Si les deux rattrapages se declenchent ensemble au demarrage, la sauvegarde
+# passe en premier. Le script revalide de toute facon l'etat de l'unite.
+After=proton-drive-backup.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/bin/proton-drive-backup-check.sh
+TimeoutStartSec=120

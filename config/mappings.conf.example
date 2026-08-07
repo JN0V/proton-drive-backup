@@ -1,0 +1,56 @@
+# Correspondances de sauvegarde Proton Drive
+# =============================================================================
+#
+# Format :   <source locale>  ->  <dossier distant de destination>
+#
+# REGLE UNIQUE : le CONTENU de la source est place dans le dossier distant.
+# Le dossier distant peut donc porter un nom different du dossier local, ce qui
+# permet de coller a une arborescence Drive existante.
+#
+#   photos  ->  /my-files/Nos photos
+#   ... envoie le contenu de ~/Documents/drive/photos dans "Nos photos".
+#   Il ne cree PAS "/my-files/Nos photos/photos".
+#
+# Cles speciales :
+#   *   correspondance par defaut, pour tout sous-dossier non liste ci-dessous.
+#       Le jeton %name% y est remplace par le nom du dossier local.
+#   .   fichiers poses directement a la racine de ~/Documents/drive
+#       (hors sous-dossier).
+#
+# Verifier ses regles sans rien envoyer :
+#   proton-drive-backup.sh --dry-run
+#
+# Un dossier source absent ou vide est simplement ignore, avec une ligne de
+# journal : pas d'echec de sauvegarde pour autant.
+#
+# Les dossiers distants manquants sont crees automatiquement, y compris les
+# niveaux intermediaires.
+#
+# ATTENTION - renommage cote Drive : les destinations sont adressees par
+# chemin (le CLI n'accepte pas les UID). Si tu renommes ou deplaces un dossier
+# de destination depuis le web ou le mobile, son chemin devient vacant. Le
+# script le detecte via l'UID memorise et ARRETE cette destination au lieu de
+# la recreer, ce qui scinderait ton contenu en deux. Pour repartir : soit tu
+# remets le nom d'origine sur le Drive, soit tu mets a jour la ligne concernee
+# ci-dessous avec le nouveau chemin.
+#
+# Lignes vides et lignes commencant par # ignorees.
+# =============================================================================
+
+
+# --- Correspondances explicites ---------------------------------------------
+# Decommente et adapte. Exemples bases sur ton Drive actuel :
+#
+# photos      ->  /my-files/Nos photos
+# papiers     ->  /my-files/Nos papiers
+# musiques    ->  /my-files/Nos musiques
+# reseau      ->  /my-files/config_reseau
+# ffaemc      ->  /my-files/video_ffaemc
+
+
+# --- Regles par defaut -------------------------------------------------------
+# Reproduisent le comportement initial : chaque sous-dossier garde son nom sous
+# /my-files/drive, et les fichiers isoles atterrissent a la racine de celui-ci.
+
+.  ->  /my-files/drive
+*  ->  /my-files/drive/%name%

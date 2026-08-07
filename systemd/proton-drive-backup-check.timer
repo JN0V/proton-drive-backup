@@ -1,0 +1,17 @@
+[Unit]
+Description=Surveillance quotidienne du retard de sauvegarde Proton Drive
+
+[Timer]
+# 13h00, soit une heure apres la fenetre de sauvegarde : laisse le temps a
+# celle-ci de se terminer avant qu'on juge son resultat.
+OnCalendar=*-*-* 13:00:00
+
+# Meme logique que pour la sauvegarde : si la machine etait eteinte, la
+# verification se fait au retour plutot que d'etre sautee.
+Persistent=true
+
+RandomizedDelaySec=5min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

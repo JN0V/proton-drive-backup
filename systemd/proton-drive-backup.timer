@@ -1,0 +1,24 @@
+[Unit]
+Description=Sauvegarde quotidienne vers Proton Drive (12h00, rattrapage si manquee)
+
+[Timer]
+# Tous les jours a 12h00
+OnCalendar=*-*-* 12:00:00
+
+# Le point cle : si l'echeance a ete manquee (PC eteint, session fermee),
+# systemd declenche le service des que possible au lieu d'attendre le
+# lendemain. C'est ce qui couvre le cas "eteint a 12h, allume a 15h".
+# L'horodatage du dernier declenchement est conserve dans
+# ~/.local/share/systemd/timers/ et survit donc au redemarrage.
+Persistent=true
+
+# Etale le declenchement sur 5 min. S'applique aussi au rattrapage, ce qui
+# evite que la fenetre de confirmation surgisse en pleine ouverture de session.
+RandomizedDelaySec=5min
+
+# Tolerance de regroupement ; 1 min suffit et evite de reveiller la machine
+# plus souvent que necessaire.
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
