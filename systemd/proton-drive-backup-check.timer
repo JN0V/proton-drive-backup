@@ -1,13 +1,13 @@
 [Unit]
-Description=Surveillance quotidienne du retard de sauvegarde Proton Drive
+Description=Daily staleness watch for the Proton Drive backup
 
 [Timer]
-# 13h00, soit une heure apres la fenetre de sauvegarde : laisse le temps a
-# celle-ci de se terminer avant qu'on juge son resultat.
+# 13:00, one hour after the backup window: gives it time to finish before its
+# result is judged.
 OnCalendar=*-*-* 13:00:00
 
-# Meme logique que pour la sauvegarde : si la machine etait eteinte, la
-# verification se fait au retour plutot que d'etre sautee.
+# Same reasoning as the backup timer: if the machine was off, the check runs on
+# return rather than being skipped.
 Persistent=true
 
 RandomizedDelaySec=5min

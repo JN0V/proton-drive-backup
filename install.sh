@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# Installe (ou reinstalle) la sauvegarde Proton Drive depuis ce depot.
+# Installs (or reinstalls) the Proton Drive backup from this repository.
 #
-# Principe : les fichiers reels vivent dans le depot, le systeme n'a que des
-# liens symboliques. Un git pull suffit donc a mettre a jour l'installation,
-# sans rien recopier.
+# Principle: the real files stay in the repository, the system only gets
+# symlinks. A git pull is therefore enough to update the installation, with
+# nothing to copy over.
 #
 set -euo pipefail
 
@@ -13,7 +13,7 @@ BIN_DIR="$HOME/bin"
 UNIT_DIR="$HOME/.config/systemd/user"
 CONF_DIR="$HOME/.config/proton-drive-backup"
 
-echo "Depot   : $REPO"
+echo "Repository: $REPO"
 mkdir -p "$BIN_DIR" "$UNIT_DIR" "$CONF_DIR"
 
 echo
@@ -24,7 +24,7 @@ for f in "$REPO"/bin/*.sh; do
 done
 
 echo
-echo "== Units systemd =="
+echo "== systemd units =="
 for f in "$REPO"/systemd/*; do
     ln -sfn "$f" "$UNIT_DIR/$(basename "$f")"
     echo "  $UNIT_DIR/$(basename "$f") -> $f"
@@ -32,12 +32,12 @@ done
 
 echo
 echo "== Configuration =="
-# Jamais ecrasee : elle contient les correspondances personnelles.
+# Never overwritten: it holds your personal mappings.
 if [ -f "$CONF_DIR/mappings.conf" ]; then
-    echo "  $CONF_DIR/mappings.conf existe deja, conserve."
+    echo "  $CONF_DIR/mappings.conf already exists, kept as is."
 else
     cp "$REPO/config/mappings.conf.example" "$CONF_DIR/mappings.conf"
-    echo "  $CONF_DIR/mappings.conf cree depuis le modele."
+    echo "  $CONF_DIR/mappings.conf created from the template."
 fi
 
 echo
@@ -48,5 +48,5 @@ systemctl --user enable --now proton-drive-backup-check.timer >/dev/null
 systemctl --user list-timers 'proton-drive-*' --no-pager
 
 echo
-echo "Termine. Verifier les correspondances :"
+echo "Done. Review your mappings with:"
 echo "  proton-drive-backup.sh --dry-run"

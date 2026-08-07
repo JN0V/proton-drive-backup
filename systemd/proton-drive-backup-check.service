@@ -1,7 +1,7 @@
 [Unit]
-Description=Verifie qu'une sauvegarde Proton Drive a reussi recemment
-# Si les deux rattrapages se declenchent ensemble au demarrage, la sauvegarde
-# passe en premier. Le script revalide de toute facon l'etat de l'unite.
+Description=Check that a Proton Drive backup succeeded recently
+# If both catch-ups fire together at session start, the backup goes first. The
+# script revalidates the unit's state anyway.
 After=proton-drive-backup.service
 
 [Service]

@@ -1,101 +1,131 @@
 # proton-drive-backup
 
-Sauvegarde planifiée de dossiers locaux vers Proton Drive, via le CLI officiel
-`proton-drive`, avec confirmation graphique et surveillance des retards.
+Scheduled backup of local folders to Proton Drive on Linux, built on the
+official `proton-drive` CLI, with a graphical confirmation prompt and a
+staleness watchdog.
 
-**Besoin couvert :** envoyer automatiquement le contenu de `~/Documents/drive`
-vers un ou plusieurs emplacements de Proton Drive, à heure fixe, sans intervention
-sauf validation.
+## Why this exists
 
-## Pourquoi ce dépôt existe
+The Proton Drive CLI (v0.7.0) does **not** do continuous synchronisation: it
+runs one operation and exits. There is also no Linux desktop client yet — Proton
+has announced one for late 2026. This repository builds the scheduling,
+confirmation and monitoring layer that is missing around the CLI.
 
-Le CLI Proton Drive (v0.7.0) ne fait **pas** de synchronisation continue : il
-exécute une opération puis rend la main. Il n'existe pas non plus de client
-graphique Linux à ce jour (annoncé pour fin 2026). Ce dépôt construit la couche
-de planification, de confirmation et de contrôle qui manque autour du CLI.
+It is a **backup** tool, not a sync engine. See [Limitations](#limitations).
 
-## Installation
+## Requirements
+
+- The official [Proton Drive CLI](https://proton.me/blog/proton-drive-cli) at
+  `~/bin/proton-drive`, signed in via `proton-drive auth login`
+- `systemd` user session, `zenity`, `libnotify` (`notify-send`), `curl`
+- Tested on Ubuntu 26.04 (GNOME / Wayland)
+
+## Install
 
 ```bash
+git clone git@github.com:JN0V/proton-drive-backup.git
+cd proton-drive-backup
 ./install.sh
 ```
 
-Les fichiers réels restent dans ce dépôt ; l'installation ne pose que des liens
-symboliques dans `~/bin` et `~/.config/systemd/user`. Un `git pull` suffit donc
-à mettre à jour l'installation.
-
-Prérequis : `proton-drive` dans `~/bin`, session ouverte via
-`proton-drive auth login`, et `zenity` (présent par défaut sur Ubuntu GNOME).
+The real files stay in the repository; installation only places symlinks in
+`~/bin` and `~/.config/systemd/user`. A `git pull` therefore updates the
+installation, with nothing to copy.
 
 ## Configuration
 
-Les correspondances vivent dans `~/.config/proton-drive-backup/mappings.conf`
-(hors dépôt : données personnelles). Modèle documenté dans
+Mappings live in `~/.config/proton-drive-backup/mappings.conf` (outside the
+repository — it holds personal data). A documented template ships as
 `config/mappings.conf.example`.
 
-Règle unique : **le contenu de la source est déposé dans le dossier distant**,
-ce qui autorise un nom distant différent du nom local.
+Single rule: **the contents of the source are placed into the remote folder**,
+which allows the remote name to differ from the local one.
 
 ```
-photos   ->  /my-files/Nos photos
+photos   ->  /my-files/Family pictures
 .        ->  /my-files/drive
 *        ->  /my-files/drive/%name%
 ```
 
-Vérifier ses règles sans rien envoyer :
+`*` is the catch-all (`%name%` expands to the folder name); `.` covers files
+sitting loose at the source root.
+
+Check your rules without transferring anything:
 
 ```bash
 proton-drive-backup.sh --dry-run
 ```
 
-## Fonctionnement
+```
+Backup plan (dry run, no transfer):
 
-| Composant | Rôle |
+  Source   : /home/you/Documents/drive
+  Mappings : /home/you/.config/proton-drive-backup/mappings.conf
+
+   1. photos → /my-files/Family pictures
+   2. notes → /my-files/drive/notes
+
+  2 destination(s).
+```
+
+## How it works
+
+| Component | Role |
 |---|---|
-| `proton-drive-backup.timer` | Déclenche à 12h00. `Persistent=true` : rattrape une échéance manquée (PC éteint) à la session suivante. |
-| `proton-drive-backup.sh` | Résout les correspondances, demande confirmation, transfère. |
-| `proton-drive-backup-check.timer` | Déclenche à 13h00. |
-| `proton-drive-backup-check.sh` | Alerte si aucune sauvegarde n'a **réussi** depuis 3 jours. |
+| `proton-drive-backup.timer` | Fires at 12:00. `Persistent=true`: a deadline missed while the machine was off is caught up at the next session. |
+| `proton-drive-backup.sh` | Resolves mappings, asks for confirmation, transfers. |
+| `proton-drive-backup-check.timer` | Fires at 13:00. |
+| `proton-drive-backup-check.sh` | Alerts when no backup has **succeeded** for 3 days. |
 
-État dans `~/.local/state/proton-drive-backup/` : journal, horodatage du dernier
-succès, empreintes UID des destinations.
+State lives in `~/.local/state/proton-drive-backup/`: log, last-success
+timestamp, destination UID fingerprints.
 
-## Décisions de conception
+Nothing is ever transferred without an explicit click. No answer within 5
+minutes counts as a decline.
 
-Les points ci-dessous sont contre-intuitifs et ont été validés par test contre
-le CLI réel.
+## Design notes
 
-**Stratégies de conflit obligatoires.** Sans `--file-conflict-strategy` et
-`--folder-conflict-strategy`, le CLI pose une question interactive et le service
-resterait bloqué jusqu'au timeout.
+The points below are counter-intuitive and were each established by testing
+against the real CLI.
 
-**Repli sur les miniatures.** Un seul fichier à extension image mais au contenu
-invalide (corrompu, tronqué, mal nommé) fait échouer *tout le lot*. Le script
-détecte ce cas précis et relance uniquement ce lot avec `--skip-thumbnails`,
-plutôt que de désactiver les miniatures partout.
+**Conflict strategies are mandatory.** Without `--file-conflict-strategy` and
+`--folder-conflict-strategy`, the CLI asks an interactive question and a systemd
+service would hang until its timeout.
 
-**Détection des renommages distants.** Le CLI n'adresse que par chemin
-(`Path "<uid>" not supported`). Un dossier renommé côté Drive laisse son chemin
-vacant, et une sauvegarde naïve le recréerait puis renverrait tout — scindant le
-contenu en deux. Le script mémorise l'UID de chaque destination et **arrête**
-la destination concernée au lieu de la recréer.
+**Thumbnail fallback.** A single file with an image extension but invalid
+content (corrupt, truncated, misnamed) fails *the entire batch*. The script
+detects that specific error and retries only that batch with
+`--skip-thumbnails`, rather than disabling thumbnails everywhere.
 
-**`create-folder` n'est pas idempotent** : il échoue si le nom existe. D'où un
-test `filesystem info` préalable à chaque niveau de l'arborescence.
+**Remote rename detection.** The CLI addresses nodes by path only — passing a
+UID yields `Path "<uid>" not supported`. A folder renamed on the Drive side
+leaves its path vacant, and a naive backup would recreate it and re-upload
+everything, splitting the content between the old folder and a new one. The
+script records each destination's UID and **stops** that destination instead of
+recreating it.
 
-**Horodatage de succès conditionné à la réussite totale.** Un succès partiel
-n'écrit pas `last-success` : sinon le chien de garde croirait l'ensemble à jour.
+**`create-folder` is not idempotent**: it fails when the name already exists.
+Hence a `filesystem info` probe at every level of the tree.
 
-**Chien de garde séparé.** Si le timer de sauvegarde ne se déclenche plus, une
-vérification hébergée dans le script de sauvegarde ne tournerait jamais. D'où
-une unité systemd indépendante.
+**Success timestamp requires total success.** A partial failure does not write
+`last-success`, otherwise the watchdog would believe the whole set is current.
 
-## Limites
+**Separate watchdog.** If the backup timer stops firing, a check hosted inside
+the backup script would never run. Hence an independent systemd unit.
 
-Sauvegarde **ascendante uniquement** : rien ne redescend, et une suppression
-locale ne supprime pas la copie distante. Le renommage ou la suppression d'un
-*fichier* laisse un orphelin côté Drive. Ce n'est pas un miroir.
+**Content-level delta is native.** Since CLI 0.7.0, files with identical content
+are skipped automatically; only real changes are uploaded.
 
-Pour un miroir bidirectionnel : attendre le client graphique Linux, ou rclone
-(backend `protondrive`, avec des limites connues sur le 2FA non interactif et
-l'absence de gestion des mtimes).
+## Limitations
+
+Upload only. Nothing is pulled back down, and a local deletion does not remove
+the remote copy. Renaming or deleting a *file* leaves an orphan on the Drive
+side. This is not a mirror.
+
+For true bidirectional sync: wait for Proton's Linux desktop client, or use
+[rclone](https://rclone.org/protondrive/) (its `protondrive` backend has known
+limitations around non-interactive 2FA and does not handle modification times).
+
+## Licence
+
+MIT

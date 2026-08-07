@@ -1,11 +1,11 @@
 [Unit]
-Description=Sauvegarde de ~/Documents/drive vers Proton Drive
+Description=Back up ~/Documents/drive to Proton Drive
 Documentation=https://proton.me/support/drive-cli
-# On ne demarre pas sans reseau utilisable
+# Do not start without usable networking
 After=network-online.target
 
 [Service]
 Type=oneshot
 ExecStart=%h/bin/proton-drive-backup.sh
-# Le transfert peut etre long ; on coupe au bout de 2h plutot que de rester bloque
+# Transfers can be long; cut off after 2h rather than hanging forever
 TimeoutStartSec=7200

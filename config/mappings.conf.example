@@ -1,56 +1,54 @@
-# Correspondances de sauvegarde Proton Drive
+# Proton Drive backup mappings
 # =============================================================================
 #
-# Format :   <source locale>  ->  <dossier distant de destination>
+# Format:   <local source>  ->  <remote destination folder>
 #
-# REGLE UNIQUE : le CONTENU de la source est place dans le dossier distant.
-# Le dossier distant peut donc porter un nom different du dossier local, ce qui
-# permet de coller a une arborescence Drive existante.
+# SINGLE RULE: the CONTENTS of the source are placed into the remote folder.
+# The remote folder may therefore carry a different name from the local one,
+# which is what lets you fit an existing Drive layout.
 #
-#   photos  ->  /my-files/Nos photos
-#   ... envoie le contenu de ~/Documents/drive/photos dans "Nos photos".
-#   Il ne cree PAS "/my-files/Nos photos/photos".
+#   photos  ->  /my-files/Family pictures
+#   ... uploads the contents of ~/Documents/drive/photos into "Family pictures".
+#   It does NOT create "/my-files/Family pictures/photos".
 #
-# Cles speciales :
-#   *   correspondance par defaut, pour tout sous-dossier non liste ci-dessous.
-#       Le jeton %name% y est remplace par le nom du dossier local.
-#   .   fichiers poses directement a la racine de ~/Documents/drive
-#       (hors sous-dossier).
+# Special keys:
+#   *   catch-all, for any subfolder not listed below. The %name% token is
+#       replaced with the local folder's name.
+#   .   files sitting directly at the root of the source directory
+#       (outside any subfolder).
 #
-# Verifier ses regles sans rien envoyer :
+# Check your rules without transferring anything:
 #   proton-drive-backup.sh --dry-run
 #
-# Un dossier source absent ou vide est simplement ignore, avec une ligne de
-# journal : pas d'echec de sauvegarde pour autant.
+# A source that is missing or empty is simply skipped, with a log line: it does
+# not fail the backup.
 #
-# Les dossiers distants manquants sont crees automatiquement, y compris les
-# niveaux intermediaires.
+# Missing remote folders are created automatically, intermediate levels
+# included.
 #
-# ATTENTION - renommage cote Drive : les destinations sont adressees par
-# chemin (le CLI n'accepte pas les UID). Si tu renommes ou deplaces un dossier
-# de destination depuis le web ou le mobile, son chemin devient vacant. Le
-# script le detecte via l'UID memorise et ARRETE cette destination au lieu de
-# la recreer, ce qui scinderait ton contenu en deux. Pour repartir : soit tu
-# remets le nom d'origine sur le Drive, soit tu mets a jour la ligne concernee
-# ci-dessous avec le nouveau chemin.
+# CAUTION - renaming on the Drive side: destinations are addressed by path (the
+# CLI does not accept UIDs). If you rename or move a destination folder from the
+# web or mobile app, its path becomes vacant. The script detects this through
+# the recorded UID and STOPS that destination instead of recreating it, which
+# would split your content in two. To recover: either restore the original name
+# on the Drive, or update the relevant line below with the new path.
 #
-# Lignes vides et lignes commencant par # ignorees.
+# Blank lines and lines starting with # are ignored.
 # =============================================================================
 
 
-# --- Correspondances explicites ---------------------------------------------
-# Decommente et adapte. Exemples bases sur ton Drive actuel :
+# --- Explicit mappings -------------------------------------------------------
+# Uncomment and adapt to your own Drive layout.
 #
-# photos      ->  /my-files/Nos photos
-# papiers     ->  /my-files/Nos papiers
-# musiques    ->  /my-files/Nos musiques
-# reseau      ->  /my-files/config_reseau
-# ffaemc      ->  /my-files/video_ffaemc
+# photos      ->  /my-files/Family pictures
+# documents   ->  /my-files/Paperwork
+# music       ->  /my-files/Music library
+# configs     ->  /my-files/machine-configs
 
 
-# --- Regles par defaut -------------------------------------------------------
-# Reproduisent le comportement initial : chaque sous-dossier garde son nom sous
-# /my-files/drive, et les fichiers isoles atterrissent a la racine de celui-ci.
+# --- Default rules -----------------------------------------------------------
+# Every subfolder keeps its name under /my-files/drive, and loose files land at
+# the root of that folder.
 
 .  ->  /my-files/drive
 *  ->  /my-files/drive/%name%
