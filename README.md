@@ -1,8 +1,8 @@
 # proton-drive-backup
 
 Scheduled backup of local folders to Proton Drive on Linux, built on the
-official `proton-drive` CLI, with a graphical confirmation prompt and a
-staleness watchdog.
+official `proton-drive` CLI, with a graphical confirmation prompt, a staleness
+watchdog and a name search over the remote tree.
 
 ## Why this exists
 
@@ -17,7 +17,7 @@ It is a **backup** tool, not a sync engine. See [Limitations](#limitations).
 
 - The official [Proton Drive CLI](https://proton.me/blog/proton-drive-cli) at
   `~/bin/proton-drive`, signed in via `proton-drive auth login`
-- `systemd` user session, `zenity`, `libnotify` (`notify-send`), `curl`
+- `systemd` user session, `zenity`, `libnotify` (`notify-send`), `curl`, `jq`
 - Tested on Ubuntu 26.04 (GNOME / Wayland)
 
 ## Install
@@ -76,12 +76,58 @@ Backup plan (dry run, no transfer):
 | `proton-drive-backup.sh` | Resolves mappings, asks for confirmation, transfers. |
 | `proton-drive-backup-check.timer` | Fires at 13:00. |
 | `proton-drive-backup-check.sh` | Alerts when no backup has **succeeded** for 3 days. |
+| `proton-drive-find.sh` | Searches the remote tree by name. Manual, read-only, no timer. |
 
 State lives in `~/.local/state/proton-drive-backup/`: log, last-success
 timestamp, destination UID fingerprints.
 
 Nothing is ever transferred without an explicit click. No answer within 5
 minutes counts as a decline.
+
+## Searching the Drive
+
+The CLI has no search command, so `proton-drive-find.sh` walks the remote tree
+with `filesystem list` and matches locally. One API call per folder, around
+1.5 s each — far too slow to repeat, so the walk is cached in an index and
+searches read from that.
+
+Budget the first walk accordingly: on a Drive of 2 263 folders and 68 367
+nodes it took **1 h 35 min** and produced an 8 MB index. Searches against it
+then return in about 60 ms.
+
+```bash
+proton-drive-find.sh --refresh        # build the index (slow, occasional)
+proton-drive-find.sh invoice 2024     # instant, offline
+```
+
+```
+  index from 2026-08-08 09:12
+
+  f    317K  2024-03-23  /my-files/drive/admin/invoice-2024-03.pdf
+  d       -  2024-01-08  /my-files/drive/invoices 2024
+
+  2 result(s).
+```
+
+Every term must appear in the path, case-insensitively, as a plain substring —
+so `invoice 2024` also matches a file named `invoice.pdf` sitting inside a
+folder named `2024`. `--type f|d` narrows to files or folders, `--path` to a
+subtree, `--all` widens to the shared and device roots. Deleted files stay out
+of every result unless you ask for them with `--path /trash`.
+
+The index is **never refreshed automatically**; its age is printed at every
+search and flagged past 7 days. `--live` skips it entirely and walks the Drive
+on the spot, which is slow but always current.
+
+`--paths` prints bare paths for piping:
+
+```bash
+proton-drive-find.sh --paths report.pdf | xargs -r proton-drive filesystem download ~/Downloads
+```
+
+Note that anything backed up *from this machine* is already local, where `find`
+is faster. Remote search earns its keep on what did not come from here: uploads
+from a phone, additions made through the web app, older content.
 
 ## Design notes
 
@@ -115,6 +161,23 @@ the backup script would never run. Hence an independent systemd unit.
 
 **Content-level delta is native.** Since CLI 0.7.0, files with identical content
 are skipped automatically; only real changes are uploaded.
+
+**Photos cannot be searched by name.** `/photos` is advertised as a root but
+`filesystem list /photos` answers `Path type photos is not supported`. The
+dedicated `photo timeline` returns node UIDs and capture times and no names, and
+feeding one of those UIDs back to `filesystem info` hits the same
+path-only restriction as everywhere else. Only photo copies living inside the
+`/my-files` tree appear in the index.
+
+**The index drops UIDs.** Storing them would be four fifths of the file for no
+benefit: nothing can consume a UID, since the CLI only addresses nodes by path.
+Keeping just path, type, size and date takes the index from 20 MB to 8 MB.
+
+**A truncated index is worse than none.** The walk writes to a temporary file
+and moves it into place at the end, so a run interrupted halfway leaves the
+previous index intact rather than a partial one that later searches would
+quietly trust. For the same reason, an unlistable folder is reported and
+counted, never skipped in silence.
 
 ## Limitations
 
