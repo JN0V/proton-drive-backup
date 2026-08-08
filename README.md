@@ -122,8 +122,15 @@ on the spot, which is slow but always current.
 `--paths` prints bare paths for piping:
 
 ```bash
-proton-drive-find.sh --paths report.pdf | xargs -r proton-drive filesystem download ~/Downloads
+proton-drive-find.sh --paths report.pdf \
+  | xargs -r -d '\n' sh -c 'proton-drive filesystem download "$@" ~/Downloads' _
 ```
+
+Two details that both bite: `filesystem download` takes the remote paths
+**first** and the local folder **last**, so a bare `xargs … download ~/Downloads`
+passes the destination as the first path and the CLI answers
+`EACCES … mkdir /my-files`. And remote paths routinely contain spaces, hence
+`-d '\n'` rather than the default word splitting.
 
 Note that anything backed up *from this machine* is already local, where `find`
 is faster. Remote search earns its keep on what did not come from here: uploads
@@ -168,6 +175,14 @@ dedicated `photo timeline` returns node UIDs and capture times and no names, and
 feeding one of those UIDs back to `filesystem info` hits the same
 path-only restriction as everywhere else. Only photo copies living inside the
 `/my-files` tree appear in the index.
+
+**Indexed sizes are encrypted sizes.** `filesystem list` reports the stored
+size, which the index records as is — so it exceeds the local size of the same
+file by a small, *variable* amount: from 59 to 266 bytes across a sample of
+PDFs, with no simple relation to file size. Comparing a local tree against the
+index by size therefore invents differences that do not exist. A file whose
+index entry reads 758 B downloads as the 677 B original. To compare for real,
+download and hash; the size column is for human reading, not for diffing.
 
 **The index drops UIDs.** Storing them would be four fifths of the file for no
 benefit: nothing can consume a UID, since the CLI only addresses nodes by path.
