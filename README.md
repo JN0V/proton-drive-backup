@@ -6,7 +6,7 @@ watchdog and a name search over the remote tree.
 
 ## Why this exists
 
-The Proton Drive CLI (v0.7.0) does **not** do continuous synchronisation: it
+The Proton Drive CLI (v0.8.0) does **not** do continuous synchronisation: it
 runs one operation and exits. There is also no Linux desktop client yet — Proton
 has announced one for late 2026. This repository builds the scheduling,
 confirmation and monitoring layer that is missing around the CLI.
@@ -15,9 +15,11 @@ It is a **backup** tool, not a sync engine. See [Limitations](#limitations).
 
 ## Requirements
 
-- The official [Proton Drive CLI](https://proton.me/blog/proton-drive-cli) at
-  `~/bin/proton-drive`, signed in via `proton-drive auth login`
-- `systemd` user session, `zenity`, `libnotify` (`notify-send`), `curl`, `jq`
+- The official [Proton Drive CLI](https://proton.me/blog/proton-drive-cli)
+  **0.8.0 or later** at `~/bin/proton-drive`, signed in via
+  `proton-drive auth login`. Earlier versions are refused: 0.8.0 renamed the
+  conflict strategies the backup relies on.
+- `systemd` user session, `zenity`, `libnotify` (`notify-send`), `jq`
 - Tested on Ubuntu 26.04 (GNOME / Wayland)
 
 ## Install
@@ -145,6 +147,22 @@ against the real CLI.
 `--folder-conflict-strategy`, the CLI asks an interactive question and a systemd
 service would hang until its timeout.
 
+**`replace` trashes, `create-new-revision` does not.** For files the backup uses
+`create-new-revision`, added in CLI 0.8.0. `replace` — the only sane option
+before it — trashes the remote file and uploads a *new node*: measured against
+the real CLI, a modified file came back with a different UID, its creation date
+reset, and the previous copy sitting in the trash. Repeated daily that fills the
+trash and burns quota until an `empty-trash`, and no version history survives.
+`create-new-revision` keeps the node and stacks a revision on it: same UID, same
+creation date, previous content still reachable. Files whose content has not
+changed are still skipped outright, so unmodified files gain no revision.
+
+**Strategy names changed in 0.8.0**, which is why earlier CLIs are refused
+rather than tolerated. `keep-both` became `rename`, `merge` disappeared for
+files, the download side spells local overwrite `remove` where the upload side
+spells remote overwrite `replace`, and the `-c/--conflict-strategy` catch-all
+was dropped. A wrong value fails before any transfer, with exit code 1.
+
 **Thumbnail fallback.** A single file with an image extension but invalid
 content (corrupt, truncated, misnamed) fails *the entire batch*. The script
 detects that specific error and retries only that batch with
@@ -168,6 +186,13 @@ the backup script would never run. Hence an independent systemd unit.
 
 **Content-level delta is native.** Since CLI 0.7.0, files with identical content
 are skipped automatically; only real changes are uploaded.
+
+**The CLI checks for its own updates.** Since 0.8.0, `proton-drive version` adds
+a line — `You are running the latest version.` or `A newer version is available:
+X (you have Y).` — so the script reads its output instead of scraping the
+download page, and reports the update in the confirmation dialog. That line
+costs an HTTP request, hence the `timeout` wrapper: an update check must never
+hold up a backup.
 
 **Photos cannot be searched by name.** `/photos` is advertised as a root but
 `filesystem list /photos` answers `Path type photos is not supported`. The

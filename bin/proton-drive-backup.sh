@@ -18,8 +18,8 @@ STAMP_SUCCESS="$LOG_DIR/last-success"   # epoch of the last SUCCESSFUL backup
 DEST_UIDS="$LOG_DIR/dest-uids"          # <remote path><TAB><uid>: rename detection
 MAX_LOG_BYTES=1048576                   # 1 MiB, then simple rotation
 CONFIRM_TIMEOUT=300                     # seconds; no answer -> do nothing
-VERSION_INDEX="https://proton.me/download/drive/cli/index.html"
-VERSION_TIMEOUT=8                       # max seconds for the version check
+MIN_CLI_VERSION="0.8.0"                 # create-new-revision requires it
+VERSION_TIMEOUT=15                      # max seconds for `proton-drive version`
 # -----------------------------------
 
 # Dry-run mode: print the plan (resolved mappings) and exit, with no prompt and
@@ -203,42 +203,56 @@ if ! "$PROTON_DRIVE" filesystem list /my-files >/dev/null 2>&1; then
     exit 1
 fi
 
-# --- Version check ------------------------------------------------------------
-# Informational only: no update is ever installed automatically, and a network
-# failure must never prevent the backup from running.
+# --- Version ------------------------------------------------------------------
+# Since 0.8.0 the CLI checks for updates itself, so `version` covers both needs
+# in one call: reading the installed version, and reporting a newer one.
+#
+#   Proton Drive CLI cli-drive@0.8.0+06e8c605
+#   Proton Drive SDK js@0.21.0+06e8c605
+#   You are running the latest version.
+#
+# The third line reads "A newer version is available: X (you have Y)." when one
+# is out, and is absent altogether when the check could not reach the network.
+#
+# Wrapped in `timeout`: that third line costs an HTTP request, and a hanging one
+# must not hold the backup.
 VERSION_NOTE=""
-check_version() {
-    local local_v remote_v newest
-    local_v=$("$PROTON_DRIVE" version 2>/dev/null \
-        | grep -oP 'cli-drive@\K[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-    if [ -z "$local_v" ]; then
-        log "VERSION: cannot read the local version."
-        return
-    fi
+VERSION_OUT="$(timeout "$VERSION_TIMEOUT" "$PROTON_DRIVE" version 2>/dev/null)"
+CLI_VERSION=$(printf '%s' "$VERSION_OUT" \
+    | grep -oP 'cli-drive@\K[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 
-    remote_v=$(curl -sL --max-time "$VERSION_TIMEOUT" "$VERSION_INDEX" 2>/dev/null \
-        | grep -oP '<h1>Proton Drive CLI \K[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-    if [ -z "$remote_v" ]; then
-        log "VERSION: check failed (network or page unavailable). Local: $local_v"
-        return
-    fi
+# This script targets the 0.8 CLI and nothing older: create-new-revision does
+# not exist before it, and every destination would fail on "Invalid conflict
+# strategy". Better to say so than to let the whole run collapse.
+if [ -z "$CLI_VERSION" ]; then
+    log "ERROR: cannot read the CLI version."
+    notify critical "Backup unavailable" \
+        "Cannot read the Proton Drive CLI version."
+    exit 1
+fi
+if [ "$(printf '%s\n%s\n' "$CLI_VERSION" "$MIN_CLI_VERSION" | sort -V | head -1)" \
+     != "$MIN_CLI_VERSION" ]; then
+    log "ERROR: CLI $CLI_VERSION is too old, $MIN_CLI_VERSION or later required."
+    notify critical "Proton Drive CLI too old" \
+        "Version $CLI_VERSION installed, $MIN_CLI_VERSION or later required.
+Download: https://proton.me/download/drive/cli/index.html"
+    exit 1
+fi
 
-    if [ "$local_v" = "$remote_v" ]; then
-        log "VERSION: up to date ($local_v)."
-        return
-    fi
-
-    newest=$(printf '%s\n%s\n' "$local_v" "$remote_v" | sort -V | tail -1)
-    if [ "$newest" = "$remote_v" ]; then
-        log "VERSION: update available ($local_v -> $remote_v)."
-        VERSION_NOTE="\n\n⚠️  <b>Update available:</b> $local_v → $remote_v"
-        notify normal "Proton Drive CLI: update available" \
-            "Version $remote_v is available (installed: $local_v)."
-    else
-        log "VERSION: local ($local_v) is newer than published ($remote_v)."
-    fi
-}
-check_version
+# Informational only: no update is ever installed automatically, and a failed
+# check must never prevent the backup from running.
+NEWER_VERSION=$(printf '%s' "$VERSION_OUT" \
+    | grep -oP 'A newer version is available: \K[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+if [ -n "$NEWER_VERSION" ]; then
+    log "VERSION: update available ($CLI_VERSION -> $NEWER_VERSION)."
+    VERSION_NOTE="\n\n⚠️  <b>Update available:</b> $CLI_VERSION → $NEWER_VERSION"
+    notify normal "Proton Drive CLI: update available" \
+        "Version $NEWER_VERSION is available (installed: $CLI_VERSION)."
+elif printf '%s' "$VERSION_OUT" | grep -q 'running the latest version'; then
+    log "VERSION: up to date ($CLI_VERSION)."
+else
+    log "VERSION: update check unavailable (network). Local: $CLI_VERSION"
+fi
 
 # --- Confirmation -------------------------------------------------------------
 TOTAL_FILES=$(find "$SOURCE_ROOT" -type f | wc -l)
@@ -401,8 +415,11 @@ for i in "${!JOB_SRCS[@]}"; do
         continue
     fi
 
+    # create-new-revision, not replace: replace trashes the remote file and
+    # uploads a new node, so every modified file loses its UID and its history
+    # and leaves a copy in the trash, run after run. A revision keeps the node.
     if "$PROTON_DRIVE" filesystem upload \
-        --file-conflict-strategy replace \
+        --file-conflict-strategy create-new-revision \
         --folder-conflict-strategy merge \
         "${items[@]}" "$dest" > "$UPLOAD_OUT" 2>&1; then
         cat "$UPLOAD_OUT" >> "$LOG_FILE"
@@ -416,7 +433,7 @@ for i in "${!JOB_SRCS[@]}"; do
             log "  Thumbnail generation failed on one file: retrying without thumbnails."
             if "$PROTON_DRIVE" filesystem upload \
                 --skip-thumbnails \
-                --file-conflict-strategy replace \
+                --file-conflict-strategy create-new-revision \
                 --folder-conflict-strategy merge \
                 "${items[@]}" "$dest" >> "$LOG_FILE" 2>&1; then
                 log "  OK without thumbnails."

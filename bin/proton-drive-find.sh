@@ -2,7 +2,7 @@
 #
 # Searches Proton Drive by name.
 #
-# The CLI (0.7.0) has no search command: the only way to find a file is to walk
+# The CLI (0.8.0) has no search command: the only way to find a file is to walk
 # the remote tree with `filesystem list` and match locally. One API call per
 # folder, around 1.5 s each, which makes a live walk far too slow to repeat.
 # Results are therefore cached in an index and searches read from that.
