@@ -25,7 +25,7 @@ It is a **backup** tool, not a sync engine. See [Limitations](#limitations).
 ## Install
 
 ```bash
-git clone git@github.com:JN0V/proton-drive-backup.git
+git clone https://github.com/JN0V/proton-drive-backup.git
 cd proton-drive-backup
 ./install.sh
 ```
@@ -76,9 +76,14 @@ Backup plan (dry run, no transfer):
 |---|---|
 | `proton-drive-backup.timer` | Fires at 12:00. `Persistent=true`: a deadline missed while the machine was off is caught up at the next session. |
 | `proton-drive-backup.sh` | Resolves mappings, asks for confirmation, transfers. |
-| `proton-drive-backup-check.timer` | Fires at 13:00. |
+| `proton-drive-backup-check.timer` | Fires at 13:00, an hour after the backup window so the result is judged on a finished run. |
 | `proton-drive-backup-check.sh` | Alerts when no backup has **succeeded** for 3 days. |
 | `proton-drive-find.sh` | Searches the remote tree by name. Manual, read-only, no timer. |
+
+Both timers carry `RandomizedDelaySec=5min`, so the actual firing is spread
+over the five minutes that follow — a run starting at 12:04 is normal. On the
+backup timer this also applies to the catch-up, which keeps the confirmation
+dialog from popping up in the middle of a login.
 
 State lives in `~/.local/state/proton-drive-backup/`: log, last-success
 timestamp, destination UID fingerprints.
@@ -94,8 +99,9 @@ with `filesystem list` and matches locally. One API call per folder, around
 searches read from that.
 
 Budget the first walk accordingly: on a Drive of 2 263 folders and 68 367
-nodes it took **1 h 35 min** and produced an 8 MB index. Searches against it
-then return in about 60 ms.
+nodes it took **1 h 35 min** and produced an 8 MB index. A later refresh of the
+same Drive, grown to 2 322 folders and 68 643 nodes, weighs 8.4 MB. Searches
+against it return in about 60 ms.
 
 ```bash
 proton-drive-find.sh --refresh        # build the index (slow, occasional)
@@ -156,6 +162,13 @@ trash and burns quota until an `empty-trash`, and no version history survives.
 `create-new-revision` keeps the node and stacks a revision on it: same UID, same
 creation date, previous content still reachable. Files whose content has not
 changed are still skipped outright, so unmodified files gain no revision.
+
+Two measurements worth knowing before assuming revisions are free. They are
+**not**: after a second upload the node's `totalStorageSize` is the sum of both
+revisions, so storage is consumed either way. What differs is that revisions
+**survive `empty-trash`**, where everything `replace` had pushed into the trash
+does not — emptying the trash destroys those older versions for good. Revisions
+are a version history; a full trash is only a bill.
 
 **Strategy names changed in 0.8.0**, which is why earlier CLIs are refused
 rather than tolerated. `keep-both` became `rename`, `merge` disappeared for
