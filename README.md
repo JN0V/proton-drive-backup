@@ -1,8 +1,8 @@
 # proton-drive-backup
 
 Scheduled backup of local folders to Proton Drive on Linux, built on the
-official `proton-drive` CLI, with a graphical confirmation prompt, a staleness
-watchdog and a name search over the remote tree.
+official `proton-drive` CLI, with a confirmation prompt (graphical or in the
+terminal), a staleness watchdog and a name search over the remote tree.
 
 ## Why this exists
 
@@ -19,7 +19,8 @@ It is a **backup** tool, not a sync engine. See [Limitations](#limitations).
   **0.8.0 or later** at `~/bin/proton-drive`, signed in via
   `proton-drive auth login`. Earlier versions are refused: 0.8.0 renamed the
   conflict strategies the backup relies on.
-- `systemd` user session, `zenity`, `libnotify` (`notify-send`), `jq`
+- `systemd` user session, `libnotify` (`notify-send`), `jq`, and `zenity` for
+  the graphical prompt — a terminal-only run does without it
 - Tested on Ubuntu 26.04 (GNOME / Wayland)
 
 ## Install
@@ -70,6 +71,45 @@ Backup plan (dry run, no transfer):
   2 destination(s).
 ```
 
+## Running it by hand
+
+The timer's job is the daily run, but the script is usable on its own:
+
+```bash
+proton-drive-backup.sh            # asks where you started it from
+proton-drive-backup.sh --yes      # no question asked
+```
+
+The prompt follows the context. Started from a terminal it asks in that
+terminal; started by the timer — no terminal on stdin — it opens the zenity
+dialog. `--cli` and `--gui` force one or the other, which is what a graphical
+session needs to be answered over SSH, or a terminal run to hand the question
+to the desktop.
+
+```
+Backup to Proton Drive
+
+  2 destination(s):
+  • photos → /my-files/Family pictures
+  • 3 root file(s) → /my-files/drive
+
+  Local total: 816 files (262M)
+  Only modified files will be transferred.
+
+Back up now? [y/N] (no answer within 300s = no)
+```
+
+`-y, --yes` skips the question altogether, for a scripted or headless run.
+Progress is otherwise silent by design: on a terminal the desktop
+notifications are mirrored to stderr, so a CLI run still reports its outcome.
+
+| | |
+|---|---|
+| `-n, --dry-run` | Print the resolved plan and exit. No prompt, no transfer. |
+| `-y, --yes` | Assume yes: skip the confirmation. |
+| `--cli` | Ask in the terminal, even under a graphical session. |
+| `--gui` | Ask with a zenity dialog, even from a terminal. |
+
 ## How it works
 
 | Component | Role |
@@ -88,8 +128,9 @@ dialog from popping up in the middle of a login.
 State lives in `~/.local/state/proton-drive-backup/`: log, last-success
 timestamp, destination UID fingerprints.
 
-Nothing is ever transferred without an explicit click. No answer within 5
-minutes counts as a decline.
+Nothing is ever transferred without an explicit confirmation, unless `--yes`
+says otherwise. No answer within 5 minutes counts as a decline, dialog or
+terminal alike.
 
 ## Searching the Drive
 
@@ -203,7 +244,7 @@ are skipped automatically; only real changes are uploaded.
 **The CLI checks for its own updates.** Since 0.8.0, `proton-drive version` adds
 a line — `You are running the latest version.` or `A newer version is available:
 X (you have Y).` — so the script reads its output instead of scraping the
-download page, and reports the update in the confirmation dialog. That line
+download page, and reports the update in the confirmation prompt. That line
 costs an HTTP request, hence the `timeout` wrapper: an update check must never
 hold up a backup.
 

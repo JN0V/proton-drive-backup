@@ -4,7 +4,8 @@
 # in ~/.config/proton-drive-backup/mappings.conf.
 #
 # Started by the systemd timer proton-drive-backup.timer, with a graphical
-# confirmation prompt. See also proton-drive-backup-check.sh (staleness alert).
+# confirmation prompt; run from a terminal it asks in the terminal instead.
+# See also proton-drive-backup-check.sh (staleness alert).
 #
 set -uo pipefail
 
@@ -22,10 +23,44 @@ MIN_CLI_VERSION="0.8.0"                 # create-new-revision requires it
 VERSION_TIMEOUT=15                      # max seconds for `proton-drive version`
 # -----------------------------------
 
+usage() {
+    cat <<'EOF'
+Usage: proton-drive-backup.sh [OPTIONS]
+
+Backs up ~/Documents/drive to Proton Drive, following the mappings declared in
+~/.config/proton-drive-backup/mappings.conf. Asks for confirmation first.
+
+Options:
+  -n, --dry-run   Print the resolved plan and exit. No prompt, no transfer.
+  -y, --yes       Assume yes: skip the confirmation entirely.
+      --cli       Ask in the terminal, even under a graphical session.
+      --gui       Ask with a zenity dialog, even from a terminal.
+  -h, --help      This help.
+
+Without --cli or --gui the prompt follows where the script was started from:
+the terminal when stdin is one (a manual run), a zenity dialog otherwise (the
+systemd timer). No answer within 5 minutes counts as a decline, either way.
+EOF
+}
+
+# --- Arguments ----------------------------------------------------------------
 # Dry-run mode: print the plan (resolved mappings) and exit, with no prompt and
 # no transfer. Used to validate mappings.conf before applying it.
 DRY_RUN=0
-[ "${1:-}" = "--dry-run" ] && DRY_RUN=1
+ASSUME_YES=0
+PROMPT_MODE=auto        # auto | cli | gui
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -n|--dry-run) DRY_RUN=1 ;;
+        -y|--yes)     ASSUME_YES=1 ;;
+        --cli)        PROMPT_MODE=cli ;;
+        --gui)        PROMPT_MODE=gui ;;
+        -h|--help)    usage; exit 0 ;;
+        *)            echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+    esac
+    shift
+done
 
 mkdir -p "$LOG_DIR"
 
@@ -36,6 +71,10 @@ log() {
 notify() {
     # $1 = urgency (normal|critical), $2 = title, $3 = body
     notify-send --app-name="Proton Drive" --urgency="$1" "$2" "$3" 2>/dev/null || true
+    # A desktop notification is invisible to someone watching a terminal, and a
+    # CLI run would otherwise report nothing at all — not even its outcome.
+    [ -t 2 ] && printf '\n%s\n%s\n' "$2" "$3" >&2
+    return 0
 }
 
 # Rotate before writing
@@ -195,7 +234,7 @@ if [ ${#JOB_SRCS[@]} -eq 0 ]; then
 fi
 
 # --- Valid session? -----------------------------------------------------------
-# Checked before the prompt, so the user is never asked to click for nothing.
+# Checked before the prompt, so the user is never asked to answer for nothing.
 if ! "$PROTON_DRIVE" filesystem list /my-files >/dev/null 2>&1; then
     log "ERROR: Proton Drive session missing or expired."
     notify critical "Proton Drive: sign-in required" \
@@ -216,7 +255,6 @@ fi
 #
 # Wrapped in `timeout`: that third line costs an HTTP request, and a hanging one
 # must not hold the backup.
-VERSION_NOTE=""
 VERSION_OUT="$(timeout "$VERSION_TIMEOUT" "$PROTON_DRIVE" version 2>/dev/null)"
 CLI_VERSION=$(printf '%s' "$VERSION_OUT" \
     | grep -oP 'cli-drive@\K[0-9]+\.[0-9]+\.[0-9]+' | head -1)
@@ -245,7 +283,6 @@ NEWER_VERSION=$(printf '%s' "$VERSION_OUT" \
     | grep -oP 'A newer version is available: \K[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 if [ -n "$NEWER_VERSION" ]; then
     log "VERSION: update available ($CLI_VERSION -> $NEWER_VERSION)."
-    VERSION_NOTE="\n\n⚠️  <b>Update available:</b> $CLI_VERSION → $NEWER_VERSION"
     notify normal "Proton Drive CLI: update available" \
         "Version $NEWER_VERSION is available (installed: $CLI_VERSION)."
 elif printf '%s' "$VERSION_OUT" | grep -q 'running the latest version'; then
@@ -255,34 +292,102 @@ else
 fi
 
 # --- Confirmation -------------------------------------------------------------
-TOTAL_FILES=$(find "$SOURCE_ROOT" -type f | wc -l)
-TOTAL_SIZE=$(du -sh "$SOURCE_ROOT" | cut -f1)
+# ANSWER follows zenity's convention throughout: 0 accepted, 5 timed out,
+# anything else declined.
+if [ "$ASSUME_YES" -eq 1 ]; then
+    log "Confirmation skipped (--yes), ${#JOB_SRCS[@]} job(s)."
+else
+    # Frontend choice: an explicit --cli/--gui wins, otherwise the prompt
+    # follows where the script was started from. The timer has no terminal, so
+    # it keeps the dialog; a manual run is asked in the terminal it was typed
+    # in, which is also the only frontend a plain SSH session can answer.
+    if [ "$PROMPT_MODE" = auto ]; then
+        if [ -t 0 ]; then PROMPT_MODE=cli; else PROMPT_MODE=gui; fi
+    fi
 
-JOB_LIST=""
-for label in "${JOB_LABELS[@]}"; do
-    JOB_LIST="$JOB_LIST
+    if [ "$PROMPT_MODE" = cli ] && [ ! -t 0 ]; then
+        log "ERROR: --cli requested but stdin is not a terminal."
+        notify critical "Backup unavailable" \
+            "--cli needs a terminal. Use --yes for an unattended run."
+        exit 1
+    fi
+    if [ "$PROMPT_MODE" = gui ] && ! command -v zenity >/dev/null 2>&1; then
+        if [ -t 0 ]; then
+            log "zenity is missing: asking in the terminal instead."
+            PROMPT_MODE=cli
+        else
+            log "ERROR: zenity is missing and there is no terminal to ask in."
+            notify critical "Backup unavailable" \
+                "zenity is missing. Use --yes for an unattended run."
+            exit 1
+        fi
+    fi
+
+    TOTAL_FILES=$(find "$SOURCE_ROOT" -type f | wc -l)
+    TOTAL_SIZE=$(du -sh "$SOURCE_ROOT" | cut -f1)
+
+    JOB_LIST=""
+    for label in "${JOB_LABELS[@]}"; do
+        JOB_LIST="$JOB_LIST
   • $label"
-done
+    done
 
-SKIP_BLOCK=""
-[ -n "$SKIPPED_REPORT" ] && SKIP_BLOCK="\n\n<b>Skipped:</b><tt>$SKIPPED_REPORT</tt>"
+    if [ "$PROMPT_MODE" = gui ]; then
+        SKIP_BLOCK=""
+        [ -n "$SKIPPED_REPORT" ] && SKIP_BLOCK="\n\n<b>Skipped:</b><tt>$SKIPPED_REPORT</tt>"
+        VERSION_NOTE=""
+        [ -n "$NEWER_VERSION" ] && \
+            VERSION_NOTE="\n\n⚠️  <b>Update available:</b> $CLI_VERSION → $NEWER_VERSION"
 
-zenity --question \
-    --title="Proton Drive backup" \
-    --icon-name=folder-remote \
-    --width=520 \
-    --timeout="$CONFIRM_TIMEOUT" \
-    --ok-label="Back up" \
-    --cancel-label="Later" \
-    --text="Start the backup to Proton Drive?\n\n<b>${#JOB_SRCS[@]} destination(s):</b><tt>$JOB_LIST</tt>\n\n<b>Local total:</b> $TOTAL_FILES files ($TOTAL_SIZE)\n\n<small>Only modified files will be transferred.</small>$SKIP_BLOCK$VERSION_NOTE" \
-    2>/dev/null
-ANSWER=$?
+        zenity --question \
+            --title="Proton Drive backup" \
+            --icon-name=folder-remote \
+            --width=520 \
+            --timeout="$CONFIRM_TIMEOUT" \
+            --ok-label="Back up" \
+            --cancel-label="Later" \
+            --text="Start the backup to Proton Drive?\n\n<b>${#JOB_SRCS[@]} destination(s):</b><tt>$JOB_LIST</tt>\n\n<b>Local total:</b> $TOTAL_FILES files ($TOTAL_SIZE)\n\n<small>Only modified files will be transferred.</small>$SKIP_BLOCK$VERSION_NOTE" \
+            2>/dev/null
+        ANSWER=$?
+    else
+        {
+            printf '\nBackup to Proton Drive\n\n'
+            printf '  %d destination(s):%s\n\n' "${#JOB_SRCS[@]}" "$JOB_LIST"
+            printf '  Local total: %s files (%s)\n' "$TOTAL_FILES" "$TOTAL_SIZE"
+            printf '  Only modified files will be transferred.\n'
+            [ -n "$SKIPPED_REPORT" ] && printf '\n  Skipped:%s\n' "$SKIPPED_REPORT"
+            [ -n "$NEWER_VERSION" ] && \
+                printf '\n  Update available: %s -> %s\n' "$CLI_VERSION" "$NEWER_VERSION"
+            printf '\n'
+        } >&2
 
-case "$ANSWER" in
-    0) log "Confirmed by the user (${#JOB_SRCS[@]} job(s))." ;;
-    5) log "ABORT: no answer within ${CONFIRM_TIMEOUT}s."; exit 0 ;;
-    *) log "ABORT: declined by the user."; exit 0 ;;
-esac
+        # read -t returns >128 on timeout and 1 on EOF: the first is the same
+        # unattended silence zenity reports as 5, the second a closed stdin,
+        # which is a decline and not something to wait five minutes for.
+        REPLY_LINE=""
+        read -r -t "$CONFIRM_TIMEOUT" \
+            -p "Back up now? [y/N] (no answer within ${CONFIRM_TIMEOUT}s = no) " \
+            REPLY_LINE
+        RC=$?
+        printf '\n' >&2
+        if [ "$RC" -gt 128 ]; then
+            ANSWER=5
+        elif [ "$RC" -ne 0 ]; then
+            ANSWER=1
+        else
+            case "$REPLY_LINE" in
+                y|Y|yes|Yes|YES) ANSWER=0 ;;
+                *)               ANSWER=1 ;;
+            esac
+        fi
+    fi
+
+    case "$ANSWER" in
+        0) log "Confirmed by the user (${#JOB_SRCS[@]} job(s))." ;;
+        5) log "ABORT: no answer within ${CONFIRM_TIMEOUT}s."; exit 0 ;;
+        *) log "ABORT: declined by the user."; exit 0 ;;
+    esac
+fi
 
 # --- Remote path handling -----------------------------------------------------
 # Proton UID of a remote node, empty when it does not exist.

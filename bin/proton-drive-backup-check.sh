@@ -28,7 +28,7 @@ log() {
 }
 
 # A backup may be running (both catch-ups firing together at session start, or
-# the confirmation dialog still open). Do not judge in that case.
+# the confirmation prompt still unanswered). Do not judge in that case.
 if systemctl --user is-active --quiet "$BACKUP_UNIT" 2>/dev/null; then
     log "WATCHDOG: backup in progress, check deferred."
     exit 0
