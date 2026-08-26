@@ -115,11 +115,21 @@ mkdir -p "$STATE_DIR"
 # The session is only needed when actually talking to the Drive; a search over
 # an existing index works offline.
 need_session() {
-    if ! "$PROTON_DRIVE" filesystem list "$DEFAULT_ROOT" >/dev/null 2>&1; then
-        echo "Proton Drive session missing or expired." >&2
-        echo "Run: proton-drive auth login" >&2
+    # The CLI prints its errors on stdout, not stderr, and exits 1 whether the
+    # session is gone or the API was never reached. Sorting the two out is
+    # worth the trouble: `auth login` is no answer to a dropped connection.
+    local out rc
+    out="$("$PROTON_DRIVE" filesystem list "$DEFAULT_ROOT" 2>&1)"
+    rc=$?
+    [ "$rc" -eq 0 ] && return 0
+    if printf '%s' "$out" | grep -qiE \
+'unable to connect|connectionrefused|connectionreset|connectiontimeout|econnrefused|econnreset|econnaborted|enetunreach|ehostunreach|enotfound|eai_again|etimedout|getaddrinfo|socket hang up|fetch failed|network'; then
+        echo "Proton Drive is unreachable: check the network." >&2
         exit 1
     fi
+    echo "Proton Drive session missing or expired." >&2
+    echo "Run: proton-drive auth login" >&2
+    exit 1
 }
 
 # --- Walking the remote tree --------------------------------------------------

@@ -238,6 +238,17 @@ Hence a `filesystem info` probe at every level of the tree.
 **Separate watchdog.** If the backup timer stops firing, a check hosted inside
 the backup script would never run. Hence an independent systemd unit.
 
+**Unreachable is not signed out.** The session probe is a network call, and the
+CLI answers a dead session and an out-of-reach API the same way: exit 1, with
+the reason printed on *stdout*. Since the timer is `Persistent=`, a missed run
+fires the instant the machine wakes, seconds before the wifi is back — enough
+to demand a new `auth login` for a session that never expired. The probe is
+therefore retried (5 tries, 20 s apart, 60 s each) while the failure still
+reads as a missing network, and the run is then *postponed* — a plain
+notification and exit 0, since an absent network is neither a failed unit nor
+anything to fix. Only a failure worded otherwise blames the session. The
+watchdog draws the same distinction before naming a cause.
+
 **Content-level delta is native.** Since CLI 0.7.0, files with identical content
 are skipped automatically; only real changes are uploaded.
 

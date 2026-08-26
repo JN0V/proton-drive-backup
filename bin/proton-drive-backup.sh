@@ -21,6 +21,9 @@ MAX_LOG_BYTES=1048576                   # 1 MiB, then simple rotation
 CONFIRM_TIMEOUT=300                     # seconds; no answer -> do nothing
 MIN_CLI_VERSION="0.8.0"                 # create-new-revision requires it
 VERSION_TIMEOUT=15                      # max seconds for `proton-drive version`
+SESSION_TIMEOUT=60                      # max seconds for one session probe
+SESSION_TRIES=5                         # probes before giving up
+SESSION_RETRY_DELAY=20                  # seconds between two probes
 # -----------------------------------
 
 usage() {
@@ -75,6 +78,14 @@ notify() {
     # CLI run would otherwise report nothing at all — not even its outcome.
     [ -t 2 ] && printf '\n%s\n%s\n' "$2" "$3" >&2
     return 0
+}
+
+# Whatever goes wrong, the Proton Drive CLI exits 1 and prints its complaint on
+# stdout; only the wording tells a dead session apart from an API it never
+# reached. These are the signatures of the second case.
+drive_unreachable() {
+    printf '%s' "$1" | grep -qiE \
+'unable to connect|connectionrefused|connectionreset|connectiontimeout|econnrefused|econnreset|econnaborted|enetunreach|ehostunreach|enotfound|eai_again|etimedout|getaddrinfo|socket hang up|fetch failed|network'
 }
 
 # Rotate before writing
@@ -235,8 +246,48 @@ fi
 
 # --- Valid session? -----------------------------------------------------------
 # Checked before the prompt, so the user is never asked to answer for nothing.
-if ! "$PROTON_DRIVE" filesystem list /my-files >/dev/null 2>&1; then
-    log "ERROR: Proton Drive session missing or expired."
+#
+# The probe is a network call, so its failure means one of two very different
+# things: the session is gone, or the Drive was simply out of reach. Reading
+# the second as the first is not a corner case here — the timer is Persistent=,
+# so a missed run fires the very moment the machine wakes up, a few seconds
+# before NetworkManager is back on the wifi. That is enough to raise a
+# "sign in again" alert for a session that never stopped being valid.
+#
+# Hence: keep retrying while the failure only looks like a missing network, and
+# blame the session only when the CLI says something else.
+SESSION_OUT=""
+SESSION_RC=1
+SESSION_TRY=1
+while [ "$SESSION_TRY" -le "$SESSION_TRIES" ]; do
+    # The CLI prints its errors on stdout, not stderr, so both are captured.
+    SESSION_OUT="$(timeout "$SESSION_TIMEOUT" \
+        "$PROTON_DRIVE" filesystem list /my-files 2>&1)"
+    SESSION_RC=$?
+    [ "$SESSION_RC" -eq 0 ] && break
+    # 124 is `timeout` cutting a hanging call off: a network symptom as well.
+    if [ "$SESSION_RC" -ne 124 ] && ! drive_unreachable "$SESSION_OUT"; then
+        break
+    fi
+    if [ "$SESSION_TRY" -lt "$SESSION_TRIES" ]; then
+        log "Proton Drive unreachable (try $SESSION_TRY/$SESSION_TRIES), \
+retrying in ${SESSION_RETRY_DELAY}s."
+        sleep "$SESSION_RETRY_DELAY"
+    fi
+    SESSION_TRY=$((SESSION_TRY + 1))
+done
+
+if [ "$SESSION_RC" -ne 0 ]; then
+    if [ "$SESSION_RC" -eq 124 ] || drive_unreachable "$SESSION_OUT"; then
+        # Nothing is broken and there is nothing to fix, so this stays a plain
+        # notification and exits 0: an absent network is not a failed unit, and
+        # a lasting one is what the watchdog is there to catch.
+        log "POSTPONED: Proton Drive unreachable after $SESSION_TRIES tries."
+        notify normal "Backup postponed" \
+            "Proton Drive is unreachable — no network. The next run will retry."
+        exit 0
+    fi
+    log "ERROR: Proton Drive session missing or expired: ${SESSION_OUT%%$'\n'*}"
     notify critical "Proton Drive: sign-in required" \
         "Run 'proton-drive auth login' in a terminal."
     exit 1

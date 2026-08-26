@@ -1,7 +1,12 @@
 [Unit]
 Description=Back up ~/Documents/drive to Proton Drive
 Documentation=https://proton.me/support/drive-cli
-# Do not start without usable networking
+# Ordering only, and only at boot: this is a user unit, so the target is the
+# user manager's own, and nothing here delays a run started on resume — when
+# the timer catches up on a missed deadline the wifi is usually still coming
+# back. Waiting for the network is therefore the script's job, not systemd's:
+# it retries the session probe instead of mistaking an unreachable API for an
+# expired session.
 After=network-online.target
 
 [Service]

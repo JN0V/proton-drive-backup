@@ -84,10 +84,21 @@ fi
 CAUSE=""
 if ! systemctl --user is-enabled --quiet proton-drive-backup.timer 2>/dev/null; then
     CAUSE="The timer is disabled."
-elif ! "$HOME/bin/proton-drive" filesystem list /my-files >/dev/null 2>&1; then
-    CAUSE="Proton Drive session expired: run 'proton-drive auth login'."
 else
-    CAUSE="Backup was most likely declined at the last prompts."
+    # The CLI prints its errors on stdout, not stderr, so both are captured:
+    # the wording is the only thing separating a dead session from a Drive that
+    # was never reached, and sending someone to `auth login` over a dropped
+    # wifi is exactly the false alarm this check exists to avoid.
+    PROBE_OUT="$(timeout 60 "$HOME/bin/proton-drive" filesystem list /my-files 2>&1)"
+    PROBE_RC=$?
+    if [ "$PROBE_RC" -eq 0 ]; then
+        CAUSE="Backup was most likely declined at the last prompts."
+    elif [ "$PROBE_RC" -eq 124 ] || printf '%s' "$PROBE_OUT" | grep -qiE \
+'unable to connect|connectionrefused|connectionreset|connectiontimeout|econnrefused|econnreset|econnaborted|enetunreach|ehostunreach|enotfound|eai_again|etimedout|getaddrinfo|socket hang up|fetch failed|network'; then
+        CAUSE="Proton Drive is unreachable from here: check the network."
+    else
+        CAUSE="Proton Drive session expired: run 'proton-drive auth login'."
+    fi
 fi
 
 log "WATCHDOG: ALERT - $AGE_TEXT. $CAUSE"
