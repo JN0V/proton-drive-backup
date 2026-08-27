@@ -2,7 +2,8 @@
 
 Scheduled backup of local folders to Proton Drive on Linux, built on the
 official `proton-drive` CLI, with a confirmation prompt (graphical or in the
-terminal), a staleness watchdog and a name search over the remote tree.
+terminal), a staleness watchdog, and a search over the remote tree by name or
+by content.
 
 ## Why this exists
 
@@ -118,7 +119,7 @@ notifications are mirrored to stderr, so a CLI run still reports its outcome.
 | `proton-drive-backup.sh` | Resolves mappings, asks for confirmation, transfers. |
 | `proton-drive-backup-check.timer` | Fires at 13:00, an hour after the backup window so the result is judged on a finished run. |
 | `proton-drive-backup-check.sh` | Alerts when no backup has **succeeded** for 3 days. |
-| `proton-drive-find.sh` | Searches the remote tree by name. Manual, read-only, no timer. |
+| `proton-drive-find.sh` | Searches the remote tree by name, or by content with `--have`. Manual, read-only, no timer. |
 
 Both timers carry `RandomizedDelaySec=5min`, so the actual firing is spread
 over the five minutes that follow — a run starting at 12:04 is normal. On the
@@ -141,7 +142,8 @@ searches read from that.
 
 Budget the first walk accordingly: on a Drive of 2 263 folders and 68 367
 nodes it took **1 h 35 min** and produced an 8 MB index. A later refresh of the
-same Drive, grown to 2 322 folders and 68 643 nodes, weighs 8.4 MB. Searches
+same Drive, grown to 2 388 folders and 70 366 nodes, took 1 h 40 min. Since the
+index gained a size and a digest column it weighs around 11 MB. Searches
 against it return in about 60 ms.
 
 ```bash
@@ -167,6 +169,27 @@ of every result unless you ask for them with `--path /trash`.
 The index is **never refreshed automatically**; its age is printed at every
 search and flagged past 7 days. `--live` skips it entirely and walks the Drive
 on the spot, which is slow but always current.
+
+`--have` answers the opposite question — *is this local file already on the
+Drive?* — on content rather than on name:
+
+```bash
+proton-drive-find.sh --have ~/Downloads/*.pdf
+```
+
+```
+  on Drive   /home/you/Downloads/invoice-2024-03.pdf
+               /my-files/drive/admin/invoice-2024-03.pdf
+  ABSENT     /home/you/Downloads/quote-2026.pdf
+```
+
+It hashes each file and looks the digest up in the index (see *The index keeps
+the plaintext size and a digest* below). Offline, instant, and blind to names:
+a file renamed on either side still matches, and two unrelated files that
+happen to share a name do not. Exit status is 0 only when every file was found,
+so it composes into a script that deletes local copies once they are safely
+remote. An index built before the digest column existed is refused with a
+pointer to `--refresh`.
 
 `--paths` prints bare paths for piping:
 
@@ -266,17 +289,39 @@ feeding one of those UIDs back to `filesystem info` hits the same
 path-only restriction as everywhere else. Only photo copies living inside the
 `/my-files` tree appear in the index.
 
-**Indexed sizes are encrypted sizes.** `filesystem list` reports the stored
-size, which the index records as is — so it exceeds the local size of the same
-file by a small, *variable* amount: from 59 to 266 bytes across a sample of
-PDFs, with no simple relation to file size. Comparing a local tree against the
-index by size therefore invents differences that do not exist. A file whose
-index entry reads 758 B downloads as the 677 B original. To compare for real,
-download and hash; the size column is for human reading, not for diffing.
+**The stored size is not the file's size, and the gap has two causes.**
+`totalStorageSize` — what `filesystem list` reports first — exceeds the
+plaintext size by:
+
+- **encryption**, an exact 59 bytes per 4 MiB block (53 on revisions written by
+  an older SDK). Perfectly regular: a 20 MB PDF over 5 blocks is 295 bytes
+  larger, every time.
+- **a thumbnail**, for images, audio and video only. Not a small constant but
+  **5 to 10 % of the file**: a 451 279-byte JPEG is stored as 476 948, a 5 MB
+  photo can gain 500 KB.
+
+The first is what a sample of PDFs shows, and it is misleading on its own: it
+suggests the stored size is *nearly* the real one, and a model built on it
+declares every photo and every MP3 modified. Both corrections are needed, and
+even then an exact size match is not identity — two unrelated PDFs here shared
+a byte count of 33 201.
+
+None of which matters any more, because the real size is available directly.
 
 **The index drops UIDs.** Storing them would be four fifths of the file for no
 benefit: nothing can consume a UID, since the CLI only addresses nodes by path.
-Keeping just path, type, size and date takes the index from 20 MB to 8 MB.
+
+**The index keeps the plaintext size and a digest.** `filesystem list -j`
+returns, per node, `activeRevision.claimedSize` — the size before encryption —
+and `activeRevision.claimedDigests.sha1`, the sha1 of that plaintext. Both come
+from the call the walk already makes, so they cost no extra request and about
+40 bytes per file. The digest was verified against local files: exact.
+
+That turns the index from a name catalogue into a content catalogue, and it is
+what makes `--have` possible. Note `sha1Verified: false` in the CLI's output:
+the digest is claimed by whichever client uploaded the revision, not recomputed
+server-side. For "did this file come from here?" that is precisely the right
+guarantee; it is not a defence against a tampered server.
 
 **A truncated index is worse than none.** The walk writes to a temporary file
 and moves it into place at the end, so a run interrupted halfway leaves the

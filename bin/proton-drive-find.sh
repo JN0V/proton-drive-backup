@@ -16,7 +16,7 @@ set -uo pipefail
 # ---------- Configuration ----------
 PROTON_DRIVE="$HOME/bin/proton-drive"
 STATE_DIR="$HOME/.local/state/proton-drive-backup"
-INDEX="$STATE_DIR/index.tsv"        # <path><TAB><type><TAB><size><TAB><mtime>
+INDEX="$STATE_DIR/index.tsv"        # path, type, stored size, mtime, plain size, sha1
 INDEX_META="$STATE_DIR/index.meta"  # coverage and freshness of the above
 DEFAULT_ROOT="/my-files"
 STALE_DAYS=7                        # beyond this, the index age is flagged
@@ -48,10 +48,18 @@ Options:
   -t, --type f|d    Files only, or folders only.
       --paths       Print bare paths, one per line, for piping into
                     `proton-drive filesystem download`.
+      --have FILE...  Answer whether each local FILE is already on the Drive,
+                    by content rather than by name. Reads the index only.
   -h, --help        This help.
 
 The index lives in ~/.local/state/proton-drive-backup/index.tsv and is never
 refreshed automatically: a full walk costs one API call per folder.
+
+It records, per node, the sha1 of the file's plaintext, which `filesystem list`
+returns at no extra cost. --have hashes a local file and looks it up in that
+column: a rename on either side changes nothing, and no download is needed.
+An index built before this column existed has to be refreshed once for --have
+to work.
 
 Photos: images under /photos cannot be searched. `photo timeline` returns UIDs
 and capture times but no names, and the CLI rejects a UID as a path. Only the
@@ -64,6 +72,7 @@ REFRESH=0
 LIVE=0
 ALL=0
 PATHS_ONLY=0
+HAVE=0
 TYPE=""
 ROOT=""
 declare -a TERMS=()
@@ -74,6 +83,7 @@ while [ $# -gt 0 ]; do
         -l|--live)    LIVE=1 ;;
         -a|--all)     ALL=1 ;;
         --paths)      PATHS_ONLY=1 ;;
+        --have)       HAVE=1 ;;
         -p|--path)
             [ $# -ge 2 ] || { echo "Missing value for $1" >&2; exit 2; }
             ROOT="${2%/}"; shift
@@ -171,16 +181,24 @@ walk() {
         #
         # The UID is deliberately not kept: it would be four fifths of the file
         # and nothing can consume it, since the CLI rejects a UID as a path.
-        while IFS=$'\t' read -r p t s m; do
+        #
+        # claimedSize and the sha1 digest, however, cost nothing: `filesystem
+        # list -j` already returns both. The stored size is the encrypted one
+        # and carries a thumbnail for images, audio and video, so it cannot be
+        # compared against a local file; claimedSize is the plaintext size and
+        # can. The digest settles the question outright, without downloading.
+        while IFS=$'\t' read -r p t s m cs h; do
             [ -z "$p" ] && continue
             WALK_ENTRIES=$((WALK_ENTRIES + 1))
-            printf '%s\t%s\t%s\t%s\n' "$p" "$t" "$s" "$m"
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$p" "$t" "$s" "$m" "$cs" "$h"
             [ "$t" = "folder" ] && queue+=("$p")
         done < <(printf '%s' "$out" | jq -r --arg base "$base" '
             .[]? | [ $base + "/" + (.name.value // "<name unavailable>"),
                      .type,
                      (.totalStorageSize // 0),
-                     (.modificationTime // "") ] | @tsv' 2>/dev/null)
+                     (.modificationTime // ""),
+                     (.activeRevision.claimedSize // ""),
+                     (.activeRevision.claimedDigests.sha1 // "") ] | @tsv' 2>/dev/null)
 
         if [ "$PROGRESS" -eq 1 ]; then
             printf '\r  %d folder(s) scanned, %d entries...' \
@@ -217,7 +235,7 @@ filter_prefix() {
 render() {
     local path type size mtime n=0 kind human
 
-    while IFS=$'\t' read -r path type size mtime; do
+    while IFS=$'\t' read -r path type size mtime csize sha1; do
         [ -z "$path" ] && continue
         n=$((n + 1))
 
@@ -230,6 +248,9 @@ render() {
             kind="d"; human="-"
         else
             kind="f"
+            # The plaintext size when the index has it; older indexes and
+            # undecryptable revisions fall back to the stored size.
+            [ -n "$csize" ] && size="$csize"
             human="$(numfmt --to=iec "$size" 2>/dev/null)" || human="$size"
         fi
         printf '  %s  %8s  %s  %s\n' "$kind" "$human" "${mtime:0:10}" "$path"
@@ -293,6 +314,39 @@ rebuild_index() {
     printf '\n' >&2
 }
 
+# --- Content lookup -----------------------------------------------------------
+# "Is this local file on the Drive?" answered on content, not on name: the sha1
+# column holds the digest of the plaintext, so a file renamed on either side
+# still matches, and a name collision between unrelated files does not.
+have_files() {
+    local f h hits rc=0
+
+    if ! grep -qP '^[^\t]*\t[^\t]*\t[^\t]*\t[^\t]*\t' "$INDEX" 2>/dev/null; then
+        echo "This index predates the sha1 column. Rebuild it with --refresh." >&2
+        exit 1
+    fi
+
+    for f in "$@"; do
+        if [ ! -f "$f" ]; then
+            printf '  ?          %s (not a file)\n' "$f" >&2
+            rc=1
+            continue
+        fi
+        h="$(sha1sum -- "$f" | cut -d' ' -f1)"
+        hits="$(awk -F'\t' -v h="$h" '$6 == h { print $1 }' "$INDEX")"
+        # Verdicts are results, so stdout, like every other search output here.
+        if [ -n "$hits" ]; then
+            printf '  on Drive   %s\n' "$f"
+            printf '%s\n' "$hits" | sed 's/^/               /'
+        else
+            printf '  ABSENT     %s\n' "$f"
+            rc=1
+        fi
+    done
+    printf '\n' >&2
+    return $rc
+}
+
 # --- Live search --------------------------------------------------------------
 if [ "$LIVE" -eq 1 ]; then
     need_session
@@ -303,6 +357,13 @@ fi
 
 # --- Indexed search -----------------------------------------------------------
 [ "$REFRESH" -eq 1 ] && rebuild_index
+
+if [ "$HAVE" -eq 1 ]; then
+    [ ${#TERMS[@]} -gt 0 ] || { echo "--have needs at least one file." >&2; exit 2; }
+    [ -s "$INDEX" ] || { echo "No index yet: build one with --refresh." >&2; exit 1; }
+    have_files "${TERMS[@]}"
+    exit $?
+fi
 
 if [ ${#TERMS[@]} -eq 0 ]; then
     exit 0   # --refresh on its own
