@@ -332,6 +332,14 @@ have_files() {
             rc=1
             continue
         fi
+        # An empty file matches every other empty file on the Drive: same
+        # digest, no information. Reporting that as "backed up" is worse than
+        # useless when the answer feeds a deletion.
+        if [ ! -s "$f" ]; then
+            printf '  empty      %s\n' "$f"
+            rc=1
+            continue
+        fi
         h="$(sha1sum -- "$f" | cut -d' ' -f1)"
         hits="$(awk -F'\t' -v h="$h" '$6 == h { print $1 }' "$INDEX")"
         # Verdicts are results, so stdout, like every other search output here.

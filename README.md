@@ -183,6 +183,10 @@ proton-drive-find.sh --have ~/Downloads/*.pdf
   ABSENT     /home/you/Downloads/quote-2026.pdf
 ```
 
+Empty files are reported as `empty` rather than found: every zero-byte file
+shares one digest, so a match against another empty file on the Drive says
+nothing — and this answer is meant to be safe to feed into a deletion.
+
 It hashes each file and looks the digest up in the index (see *The index keeps
 the plaintext size and a digest* below). Offline, instant, and blind to names:
 a file renamed on either side still matches, and two unrelated files that
