@@ -108,6 +108,7 @@ notifications are mirrored to stderr, so a CLI run still reports its outcome.
 |---|---|
 | `-n, --dry-run` | Print the resolved plan and exit. No prompt, no transfer. |
 | `-y, --yes` | Assume yes: skip the confirmation. |
+| `--only PATH` | Back up only this sub-path of the source (relative, e.g. `Projects/reports`), to the mapping of its top-level folder extended with the rest of the path. Meant for pushing one folder right after it changed, from another service's `ExecStartPost`. Other destinations' fingerprints are kept as they are, and the success stamp is not written: a partial run must not pass for a full one. |
 | `--cli` | Ask in the terminal, even under a graphical session. |
 | `--gui` | Ask with a zenity dialog, even from a terminal. |
 

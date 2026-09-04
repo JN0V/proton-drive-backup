@@ -36,6 +36,11 @@ Backs up ~/Documents/drive to Proton Drive, following the mappings declared in
 Options:
   -n, --dry-run   Print the resolved plan and exit. No prompt, no transfer.
   -y, --yes       Assume yes: skip the confirmation entirely.
+      --only PATH Back up only this sub-path of the source (relative, e.g.
+                  "Projects/reports"). Its destination is the mapping of its
+                  top-level folder plus the remaining path. Other fingerprints
+                  are kept untouched, and the success stamp is not written:
+                  a partial run must not pass for a full one.
       --cli       Ask in the terminal, even under a graphical session.
       --gui       Ask with a zenity dialog, even from a terminal.
   -h, --help      This help.
@@ -52,6 +57,7 @@ EOF
 DRY_RUN=0
 ASSUME_YES=0
 PROMPT_MODE=auto        # auto | cli | gui
+ONLY=""                 # sub-path restriction, see --only
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -59,6 +65,7 @@ while [ $# -gt 0 ]; do
         -y|--yes)     ASSUME_YES=1 ;;
         --cli)        PROMPT_MODE=cli ;;
         --gui)        PROMPT_MODE=gui ;;
+        --only)       shift; ONLY="${1:-}"; [ -n "$ONLY" ] || { echo "--only needs a path" >&2; exit 2; } ;;
         -h|--help)    usage; exit 0 ;;
         *)            echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
@@ -220,6 +227,33 @@ if [ ${#rootfiles[@]} -gt 0 ]; then
 fi
 
 shopt -u dotglob nullglob
+
+# --- Single sub-path (--only) -------------------------------------------------
+# Replaces the whole job list with one job: the sub-path's contents go to the
+# mapping of its top-level folder, extended with the rest of the path. Used to
+# push one folder right after it changed, without waiting for the daily run.
+if [ -n "$ONLY" ]; then
+    ONLY="${ONLY%/}"
+    only_src="$SOURCE_ROOT/$ONLY"
+    if [ ! -d "$only_src" ]; then
+        echo "--only: '$only_src' is not a directory" >&2
+        exit 2
+    fi
+    only_top="${ONLY%%/*}"
+    only_rest="${ONLY#"$only_top"}"      # "" or "/rest/of/path"
+    if only_dest="$(lookup_dest "$only_top")"; then
+        :
+    elif [ -n "$CATCHALL_DEST" ]; then
+        only_dest="${CATCHALL_DEST//%name%/$only_top}"
+    else
+        echo "--only: '$only_top' has no mapping and there is no catch-all rule" >&2
+        exit 2
+    fi
+    JOB_SRCS=("$only_src")
+    JOB_DESTS=("$only_dest$only_rest")
+    JOB_LABELS=("$ONLY → $only_dest$only_rest")
+    SKIPPED_REPORT=""
+fi
 
 # --- Dry-run exit -------------------------------------------------------------
 # Placed before the "nothing to back up" bail-out: a dry run must print its plan
@@ -607,7 +641,14 @@ done
 shopt -u dotglob nullglob
 
 # Rewrite the fingerprints. Only this run's destinations are kept, so entries
-# removed from mappings.conf disappear on their own.
+# removed from mappings.conf disappear on their own — except under --only,
+# where a single destination was visited: the others are carried over as they
+# were, or the next full run would take every one of them for a first backup.
+if [ -n "$ONLY" ]; then
+    for d in "${!KNOWN_UID[@]}"; do
+        [ -n "${NEW_UID[$d]:-}" ] || NEW_UID["$d"]="${KNOWN_UID[$d]}"
+    done
+fi
 : > "$DEST_UIDS"
 for d in "${!NEW_UID[@]}"; do
     [ -n "${NEW_UID[$d]}" ] && printf '%s\t%s\n' "$d" "${NEW_UID[$d]}" >> "$DEST_UIDS"
@@ -620,10 +661,14 @@ if [ "$FAILED" -eq 0 ]; then
     log "SUCCESS: $DONE destination(s) in ${ELAPSED}s."
     # Timestamp read by proton-drive-backup-check.sh (3-day staleness watch).
     # Written only when EVERY destination succeeded: a partial success must not
-    # suggest the whole set is up to date.
-    date +%s > "$STAMP_SUCCESS"
-    notify normal "Backup complete" \
-        "$DONE destination(s) processed in ${ELAPSED}s."
+    # suggest the whole set is up to date — nor a --only run, for the same reason.
+    if [ -z "$ONLY" ]; then
+        date +%s > "$STAMP_SUCCESS"
+        notify normal "Backup complete" \
+            "$DONE destination(s) processed in ${ELAPSED}s."
+    else
+        notify low "Backup of $ONLY complete" "${ELAPSED}s."
+    fi
     exit 0
 else
     log "PARTIAL FAILURE: $DONE succeeded, $FAILED failed, ${ELAPSED}s."
