@@ -38,6 +38,33 @@ installation, with nothing to copy.
 
 ## Configuration
 
+Two files, both in `~/.config/proton-drive-backup/` and outside the repository.
+`install.sh` creates them from the templates in `config/` and never overwrites
+them afterwards.
+
+### Host settings
+
+`backup.conf` holds what differs from one machine to the next. Every line is
+optional: left commented out, as in the template, the defaults apply.
+
+| Key | Default | |
+|---|---|---|
+| `SOURCE_ROOT` | `~/Documents/drive` | Local folder whose subfolders are matched against the mappings. |
+
+It is plain `KEY=value`, read rather than sourced: nothing is expanded but a
+leading `~/`. Values may be quoted; unquoted, a `#` at the start of the value or
+after a space starts a comment. An unknown key or a malformed line is logged by
+line number, never by content, since the line may hold a secret and the log is
+not private. `SOURCE_ROOT` must be absolute.
+Any key can be overridden for one run from the environment, with a
+`PROTON_DRIVE_BACKUP_` prefix:
+
+```bash
+PROTON_DRIVE_BACKUP_SOURCE_ROOT=/srv/export proton-drive-backup.sh --dry-run
+```
+
+### Mappings
+
 Mappings live in `~/.config/proton-drive-backup/mappings.conf` (outside the
 repository — it holds personal data). A documented template ships as
 `config/mappings.conf.example`.
@@ -121,6 +148,7 @@ notifications are mirrored to stderr, so a CLI run still reports its outcome.
 | `proton-drive-backup-check.timer` | Fires at 13:00, an hour after the backup window so the result is judged on a finished run. |
 | `proton-drive-backup-check.sh` | Alerts when no backup has **succeeded** for 3 days. |
 | `proton-drive-find.sh` | Searches the remote tree by name, or by content with `--have`. Manual, read-only, no timer. |
+| `lib/common.sh` | Used by `proton-drive-backup.sh`: reads `backup.conf`. |
 
 Both timers carry `RandomizedDelaySec=5min`, so the actual firing is spread
 over the five minutes that follow — a run starting at 12:04 is normal. On the

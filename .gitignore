@@ -1,3 +1,4 @@
-# Configuration personnelle : vit dans ~/.config/proton-drive-backup/
+# Personal configuration: lives in ~/.config/proton-drive-backup/
 mappings.conf
+backup.conf
 *.log

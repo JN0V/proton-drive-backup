@@ -32,13 +32,15 @@ done
 
 echo
 echo "== Configuration =="
-# Never overwritten: it holds your personal mappings.
-if [ -f "$CONF_DIR/mappings.conf" ]; then
-    echo "  $CONF_DIR/mappings.conf already exists, kept as is."
-else
-    cp "$REPO/config/mappings.conf.example" "$CONF_DIR/mappings.conf"
-    echo "  $CONF_DIR/mappings.conf created from the template."
-fi
+# Never overwritten: they hold your personal settings.
+for name in mappings backup; do
+    if [ -f "$CONF_DIR/$name.conf" ]; then
+        echo "  $CONF_DIR/$name.conf already exists, kept as is."
+    else
+        cp "$REPO/config/$name.conf.example" "$CONF_DIR/$name.conf"
+        echo "  $CONF_DIR/$name.conf created from the template."
+    fi
+done
 
 echo
 echo "== Activation =="

@@ -1,0 +1,21 @@
+# Proton Drive backup host settings
+# =============================================================================
+#
+# Everything that differs from one machine to the next. Every line is optional:
+# left commented out, the default applies, which is the desktop behaviour.
+#
+# Format: KEY=value, one per line. Not a shell script: nothing is expanded
+# except a leading ~/ . Quotes around the value are optional; unquoted, " #"
+# starts a comment.
+#
+# Any key can be overridden for a single run from the environment, prefixed
+# with PROTON_DRIVE_BACKUP_ :
+#   PROTON_DRIVE_BACKUP_SOURCE_ROOT=/tmp/test proton-drive-backup.sh --dry-run
+# =============================================================================
+
+
+# --- Source ------------------------------------------------------------------
+# Local folder whose subfolders are matched against mappings.conf. Absolute
+# (or ~/...).
+#
+# SOURCE_ROOT=~/Documents/drive

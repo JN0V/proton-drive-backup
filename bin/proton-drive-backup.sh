@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Backs up ~/Documents/drive to Proton Drive, following the mappings declared
-# in ~/.config/proton-drive-backup/mappings.conf.
+# Backs up a local folder (~/Documents/drive unless backup.conf says otherwise)
+# to Proton Drive, following the mappings declared in
+# ~/.config/proton-drive-backup/mappings.conf.
 #
 # Started by the systemd timer proton-drive-backup.timer, with a graphical
 # confirmation prompt; run from a terminal it asks in the terminal instead.
@@ -9,9 +10,12 @@
 #
 set -uo pipefail
 
+# shellcheck source=../lib/common.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/common.sh" || exit 1
+
 # ---------- Configuration ----------
 PROTON_DRIVE="$HOME/bin/proton-drive"
-SOURCE_ROOT="$HOME/Documents/drive"
+SOURCE_ROOT="$(conf SOURCE_ROOT "$HOME/Documents/drive")"
 MAPPINGS_FILE="$HOME/.config/proton-drive-backup/mappings.conf"
 LOG_DIR="$HOME/.local/state/proton-drive-backup"
 LOG_FILE="$LOG_DIR/backup.log"
@@ -30,8 +34,12 @@ usage() {
     cat <<'EOF'
 Usage: proton-drive-backup.sh [OPTIONS]
 
-Backs up ~/Documents/drive to Proton Drive, following the mappings declared in
+Backs up the source folder to Proton Drive, following the mappings declared in
 ~/.config/proton-drive-backup/mappings.conf. Asks for confirmation first.
+
+The source is ~/Documents/drive unless SOURCE_ROOT is set in
+~/.config/proton-drive-backup/backup.conf (or PROTON_DRIVE_BACKUP_SOURCE_ROOT
+in the environment).
 
 Options:
   -n, --dry-run   Print the resolved plan and exit. No prompt, no transfer.
@@ -101,6 +109,7 @@ if [ -f "$LOG_FILE" ] && [ "$(stat -c%s "$LOG_FILE")" -gt "$MAX_LOG_BYTES" ]; th
 fi
 
 log "--- Timer fired ---"
+[ -n "$CONF_IGNORED" ] && log "CONFIG: ignored in $CONF_FILE:$CONF_IGNORED"
 
 # --- Preflight checks ---------------------------------------------------------
 if [ ! -x "$PROTON_DRIVE" ]; then
@@ -108,6 +117,16 @@ if [ ! -x "$PROTON_DRIVE" ]; then
     notify critical "Backup unavailable" "Proton Drive CLI not found."
     exit 1
 fi
+
+# Relative would mean relative to wherever the script happens to be started:
+# $HOME under systemd, anything at all from a shell.
+case "$SOURCE_ROOT" in
+    /*) ;;
+    *)
+        log "ERROR: SOURCE_ROOT must be an absolute path: $SOURCE_ROOT"
+        notify critical "Backup unavailable" "SOURCE_ROOT is not an absolute path: $SOURCE_ROOT"
+        exit 1 ;;
+esac
 
 if [ ! -d "$SOURCE_ROOT" ]; then
     log "ERROR: source directory missing: $SOURCE_ROOT"
