@@ -15,6 +15,10 @@ LOG_DIR="$HOME/.local/state/proton-drive-backup"
 LOG_FILE="$LOG_DIR/backup.log"
 STAMP_SUCCESS="$LOG_DIR/last-success"
 STAMP_WARNED="$LOG_DIR/last-warned"   # rate limit: at most one alert per day
+# Just under a day, not 24h: the timer fires at 13:00 plus up to 5 min of random
+# delay, so an alert sent at 13:04 would otherwise mute the next day's check if
+# it happened to fire at 13:01.
+WARN_INTERVAL_SEC=72000
 BACKUP_UNIT="proton-drive-backup.service"
 # -----------------------------------
 
@@ -73,8 +77,8 @@ fi
 # Without this, an expired session would raise an alert on every timer tick.
 if [ -f "$STAMP_WARNED" ]; then
     WARNED=$(cat "$STAMP_WARNED" 2>/dev/null)
-    if [[ "$WARNED" =~ ^[0-9]+$ ]] && [ $(( NOW - WARNED )) -lt 86400 ]; then
-        log "WATCHDOG: still stale, alert already raised less than 24h ago."
+    if [[ "$WARNED" =~ ^[0-9]+$ ]] && [ $(( NOW - WARNED )) -lt "$WARN_INTERVAL_SEC" ]; then
+        log "WATCHDOG: still stale, alert already raised today."
         exit 0
     fi
 fi
