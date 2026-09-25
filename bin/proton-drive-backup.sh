@@ -5,7 +5,8 @@
 # ~/.config/proton-drive-backup/mappings.conf.
 #
 # Started by the systemd timer proton-drive-backup.timer, with a graphical
-# confirmation prompt; run from a terminal it asks in the terminal instead.
+# confirmation prompt; run from a terminal it asks in the terminal instead. A
+# headless host runs it with --yes (see install.sh --headless).
 # See also proton-drive-backup-check.sh (staleness alert).
 #
 set -uo pipefail
