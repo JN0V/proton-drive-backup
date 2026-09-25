@@ -401,7 +401,12 @@ Hence a `filesystem info` probe at every level of the tree.
 `last-success`, otherwise the watchdog would believe the whole set is current.
 
 **Separate watchdog.** If the backup timer stops firing, a check hosted inside
-the backup script would never run. Hence an independent systemd unit.
+the backup script would never run. Hence an independent systemd unit. When the
+Drive answers but nothing succeeded, it names the last run's outcome from the
+log rather than assuming a declined prompt, which cannot happen with `--yes`.
+Every run logs how it ended, dry runs included; a run with no ending was cut
+short — its timeout, a kill, a shutdown — and is reported as such rather than
+by reaching back to an older outcome.
 
 **Unreachable is not signed out.** The session probe is a network call, and the
 CLI answers a dead session and an out-of-reach API the same way: exit 1, with

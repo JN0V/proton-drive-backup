@@ -247,6 +247,7 @@ if [ -n "$ONLY" ]; then
     ONLY="${ONLY%/}"
     only_src="$SOURCE_ROOT/$ONLY"
     if [ ! -d "$only_src" ]; then
+        log "ERROR: --only: '$only_src' is not a directory."
         echo "--only: '$only_src' is not a directory" >&2
         exit 2
     fi
@@ -257,6 +258,7 @@ if [ -n "$ONLY" ]; then
     elif [ -n "$CATCHALL_DEST" ]; then
         only_dest="${CATCHALL_DEST//%name%/$only_top}"
     else
+        log "ERROR: --only: '$only_top' has no mapping and there is no catch-all rule."
         echo "--only: '$only_top' has no mapping and there is no catch-all rule" >&2
         exit 2
     fi
@@ -280,6 +282,8 @@ if [ "$DRY_RUN" -eq 1 ]; then
         printf '\n  Skipped:%s\n' "$SKIPPED_REPORT"
     fi
     printf '\n  %d destination(s).\n\n' "${#JOB_SRCS[@]}"
+    # Every run logs how it ended; the watchdog skips this one.
+    log "DRY RUN: plan printed, nothing transferred."
     exit 0
 fi
 

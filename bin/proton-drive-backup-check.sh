@@ -99,7 +99,38 @@ else
     PROBE_OUT="$(timeout 60 "$HOME/bin/proton-drive" filesystem list /my-files 2>&1)"
     PROBE_RC=$?
     if [ "$PROBE_RC" -eq 0 ]; then
-        CAUSE="Backup was most likely declined at the last prompts."
+        # The Drive answers, so the reason lies in how the runs ended. Blaming
+        # the prompt without looking was fine while every run asked one; a
+        # headless host runs with --yes, and there the prompt is never the cause.
+        #
+        # Judged on the last run, not on the last outcome line: a run killed on
+        # its timeout or by a power cut logs no outcome at all, and reaching
+        # back to an older one would name a cause that no longer applies. Dry
+        # runs are skipped, since they say nothing about the backup.
+        LAST_OUTCOME="$(cat "$LOG_FILE.1" "$LOG_FILE" 2>/dev/null | awk '
+            function close_run() {
+                if (!inrun) return
+                if (out != "DRY") last = (out == "" ? "UNFINISHED" : out)
+            }
+            / --- Timer fired ---$/ { close_run(); inrun = 1; out = ""; next }
+            inrun && out == "" && /^[0-9-]+ [0-9:]+  DRY RUN/ { out = "DRY"; next }
+            inrun && out == "" && /^[0-9-]+ [0-9:]+  (SUCCESS|ABORT|PARTIAL FAILURE|ERROR|POSTPONED)/ {
+                sub(/^[^ ]+ [^ ]+  /, ""); out = $0
+            }
+            END { close_run(); print last }')"
+        case "$LAST_OUTCOME" in
+            "")
+                CAUSE="No backup run on record." ;;
+            UNFINISHED)
+                CAUSE="The last run did not finish: timed out, killed or cut by a shutdown." ;;
+            "ABORT: declined"*|"ABORT: no answer"*)
+                CAUSE="Backup was most likely declined at the last prompts." ;;
+            SUCCESS*)
+                # Only --only runs log a success without stamping it.
+                CAUSE="Only partial (--only) runs succeeded since." ;;
+            *)
+                CAUSE="Last run: $LAST_OUTCOME" ;;
+        esac
     elif [ "$PROBE_RC" -eq 124 ] || printf '%s' "$PROBE_OUT" | grep -qiE \
 'unable to connect|connectionrefused|connectionreset|connectiontimeout|econnrefused|econnreset|econnaborted|enetunreach|ehostunreach|enotfound|eai_again|etimedout|getaddrinfo|socket hang up|fetch failed|network'; then
         CAUSE="Proton Drive is unreachable from here: check the network."
