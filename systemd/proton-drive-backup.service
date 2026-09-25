@@ -1,5 +1,5 @@
 [Unit]
-Description=Back up ~/Documents/drive to Proton Drive
+Description=Back up a local folder to Proton Drive
 Documentation=https://proton.me/support/drive-cli
 # Ordering only, and only at boot: this is a user unit, so the target is the
 # user manager's own, and nothing here delays a run started on resume — when
