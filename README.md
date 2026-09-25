@@ -212,6 +212,65 @@ Nothing is ever transferred without an explicit confirmation, unless `--yes`
 says otherwise. No answer within 5 minutes counts as a decline, dialog or
 terminal alike.
 
+## Headless hosts
+
+The same repository runs on a machine without a desktop — a server, a
+Raspberry Pi — reached over SSH. Four things differ from a desktop.
+
+**Nobody answers the prompt.** Install with:
+
+```bash
+./install.sh --headless
+```
+
+It adds a drop-in, `~/.config/systemd/user/proton-drive-backup.service.d/headless.conf`,
+that runs the timer's backup with `--yes`; the unit itself stays a symlink into
+the repository. zenity is not needed. A manual run over SSH still asks in the
+terminal. A later `./install.sh` without the flag keeps the drop-in: removing it
+would bring back a prompt that nobody can answer, and every run would be lost.
+
+**Timers need lingering.** A user's systemd manager, and its timers, only
+lives while that user is logged in, unless lingering is enabled:
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+`install.sh --headless` reports whether it is.
+
+**The session cannot go in a keychain.** The CLI stores its session in the
+desktop keychain by default, which a headless host does not have. Its
+`PROTON_DRIVE_CREDENTIALS_STORE` variable selects another store:
+
+| Value | Where | |
+|---|---|---|
+| `keychain` | desktop secret service | Default. Needs a desktop session. |
+| `unsafe_file` | `~/.local/share/proton-drive-cli/auth-session.json`, mode 600 | In clear: anyone who can read the file holds the session. Nothing to unlock, so it survives reboots. |
+| `pass` | [`pass`](https://www.passwordstore.org/), entry `ch.proton.drive/drive-sdk-cli/auth-session` | Encrypted with GPG. An unattended run needs `gpg-agent` to hold the key unlocked — by default for only 10 minutes after its last use — or a key without a passphrase, which is hardly safer than `unsafe_file`. A locked key is likely to be reported as a session to sign in again. |
+
+The variable has to reach both the timers and your shell — `auth login` writes
+to the store it names, and the scripts read from theirs:
+
+```bash
+# Timers: read by the systemd user manager
+mkdir -p ~/.config/environment.d
+echo 'PROTON_DRIVE_CREDENTIALS_STORE=unsafe_file' > ~/.config/environment.d/proton-drive.conf
+systemctl --user daemon-reload
+systemctl --user show-environment | grep PROTON_DRIVE     # check
+
+# Shells, including SSH sessions
+echo 'export PROTON_DRIVE_CREDENTIALS_STORE=unsafe_file' >> ~/.profile
+```
+
+Then sign in. `auth login` prints a link: open it in a browser on any other
+device.
+
+**Notifications need a command.** `notify-send` reaches nobody without a
+desktop: set `NOTIFY=command` and a [notification command](#notification-command).
+`install.sh --headless` warns when there is none. Prefer a path that does not
+depend on the link it reports on: an alert about an unreachable Drive has little
+chance of crossing that same broken connection to a remote service.
+
 ## Searching the Drive
 
 The CLI has no search command, so `proton-drive-find.sh` walks the remote tree
