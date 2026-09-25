@@ -16,7 +16,8 @@
 
 # --- Source ------------------------------------------------------------------
 # Local folder whose subfolders are matched against mappings.conf. Absolute
-# (or ~/...).
+# (or ~/...). A source with nothing in it at all is reported as an error: on a
+# server, that is what an unmounted disk looks like.
 #
 # SOURCE_ROOT=~/Documents/drive
 

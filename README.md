@@ -397,6 +397,12 @@ recreating it.
 **`create-folder` is not idempotent**: it fails when the name already exists.
 Hence a `filesystem info` probe at every level of the tree.
 
+**An empty source is an error.** When the source sits on a separate disk that
+fails to mount, the bare mount point is an empty directory, and backing up
+nothing every day would look like success until the watchdog noticed three days
+later. A source with no entry at all is therefore reported as a critical failure
+(a dry run just shows the empty plan), and so is one that cannot be read.
+
 **Success timestamp requires total success.** A partial failure does not write
 `last-success`, otherwise the watchdog would believe the whole set is current.
 

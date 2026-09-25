@@ -126,6 +126,24 @@ if [ ! -d "$SOURCE_ROOT" ]; then
     exit 1
 fi
 
+if [ ! -r "$SOURCE_ROOT" ] || [ ! -x "$SOURCE_ROOT" ]; then
+    log "ERROR: source directory not readable: $SOURCE_ROOT"
+    notify critical "Backup unavailable" "Cannot read $SOURCE_ROOT"
+    exit 1
+fi
+
+# Not a single entry is not a quiet day, it is a source that is not there: on a
+# server, typically a disk that failed to mount, leaving the bare mount point.
+# Left to the "nothing to back up" path below, it would be a silent daily
+# no-op until the watchdog noticed, three days later. A dry run shows the empty
+# plan instead, which says the same thing without an alert.
+if [ "$DRY_RUN" -eq 0 ] && [ -z "$(ls -A "$SOURCE_ROOT" 2>/dev/null)" ]; then
+    log "ERROR: source directory is empty: $SOURCE_ROOT"
+    notify critical "Backup unavailable" \
+        "$SOURCE_ROOT is empty. An unmounted disk?"
+    exit 1
+fi
+
 if [ ! -f "$MAPPINGS_FILE" ]; then
     log "ERROR: mappings file missing: $MAPPINGS_FILE"
     notify critical "Backup unavailable" \
