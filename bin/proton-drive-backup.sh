@@ -86,15 +86,6 @@ log() {
     printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE"
 }
 
-notify() {
-    # $1 = urgency (normal|critical), $2 = title, $3 = body
-    notify-send --app-name="Proton Drive" --urgency="$1" "$2" "$3" 2>/dev/null || true
-    # A desktop notification is invisible to someone watching a terminal, and a
-    # CLI run would otherwise report nothing at all — not even its outcome.
-    [ -t 2 ] && printf '\n%s\n%s\n' "$2" "$3" >&2
-    return 0
-}
-
 # Whatever goes wrong, the Proton Drive CLI exits 1 and prints its complaint on
 # stdout; only the wording tells a dead session apart from an API it never
 # reached. These are the signatures of the second case.

@@ -9,6 +9,9 @@
 #
 set -uo pipefail
 
+# shellcheck source=../lib/common.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/common.sh" || exit 1
+
 # ---------- Configuration ----------
 MAX_AGE_DAYS=3
 LOG_DIR="$HOME/.local/state/proton-drive-backup"
@@ -106,16 +109,18 @@ else
 fi
 
 log "WATCHDOG: ALERT - $AGE_TEXT. $CAUSE"
-date +%s > "$STAMP_WARNED"
 
-notify-send \
-    --app-name="Proton Drive" \
-    --urgency=critical \
-    --icon=dialog-warning \
-    "Proton Drive backup is overdue" \
+# Counted as raised only once delivered: on a headless host the notification
+# command is the only channel, and an alert lost to an outage must not mute the
+# next check.
+if notify critical "Proton Drive backup is overdue" \
     "More than $MAX_AGE_DAYS days without a successful backup.
 $AGE_TEXT.
 
-$CAUSE" 2>/dev/null || true
+$CAUSE" dialog-warning; then
+    date +%s > "$STAMP_WARNED"
+else
+    log "WATCHDOG: alert not delivered, the next check will send it again."
+fi
 
 exit 0

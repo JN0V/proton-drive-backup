@@ -19,3 +19,18 @@
 # (or ~/...).
 #
 # SOURCE_ROOT=~/Documents/drive
+
+
+# --- Notifications -----------------------------------------------------------
+# Space-separated list of: desktop (notify-send), command, none.
+# A host without a graphical session has nobody to show a desktop notification
+# to: use a command there.
+#
+# NOTIFY=desktop
+
+# Executable called as: COMMAND URGENCY TITLE BODY, URGENCY being low, normal
+# or critical, exit status 0 meaning delivered. An absolute path (or ~/...) to
+# an executable file, no arguments. It can reach any service;
+# examples/notify-ntfy.sh in the repository is one.
+#
+# NOTIFY_COMMAND=~/bin/notify-ntfy.sh

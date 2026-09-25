@@ -20,8 +20,11 @@ It is a **backup** tool, not a sync engine. See [Limitations](#limitations).
   **0.8.0 or later** at `~/bin/proton-drive`, signed in via
   `proton-drive auth login`. Earlier versions are refused: 0.8.0 renamed the
   conflict strategies the backup relies on.
-- `systemd` user session, `libnotify` (`notify-send`), `jq`, and `zenity` for
-  the graphical prompt — a terminal-only run does without it
+- `systemd` user session, and `jq` for `proton-drive-find.sh`
+- On a desktop: `libnotify` (`notify-send`), and `zenity` for the graphical
+  prompt — a terminal-only run does without it
+- On a host without a desktop: a notification command of your own — see
+  [Notification command](#notification-command)
 - Tested on Ubuntu 26.04 (GNOME / Wayland)
 
 ## Install
@@ -50,6 +53,8 @@ optional: left commented out, as in the template, the defaults apply.
 | Key | Default | |
 |---|---|---|
 | `SOURCE_ROOT` | `~/Documents/drive` | Local folder whose subfolders are matched against the mappings. |
+| `NOTIFY` | `desktop` | Space-separated list of `desktop` (`notify-send`), `command`, `none`. |
+| `NOTIFY_COMMAND` | | Executable run for each notification when `command` is listed. See below. |
 
 It is plain `KEY=value`, read rather than sourced: nothing is expanded but a
 leading `~/`. Values may be quoted; unquoted, a `#` at the start of the value or
@@ -62,6 +67,51 @@ Any key can be overridden for one run from the environment, with a
 ```bash
 PROTON_DRIVE_BACKUP_SOURCE_ROOT=/srv/export proton-drive-backup.sh --dry-run
 ```
+
+### Notification command
+
+`notify-send` covers a desktop. Anything else — a phone, a chat, a mailbox — is
+reached through a command of your own, which the tool calls as:
+
+```
+NOTIFY_COMMAND URGENCY TITLE BODY
+```
+
+- `URGENCY` is `low`, `normal` or `critical`. Only `critical` calls for action:
+  a session to renew, a destination not found, a backup overdue.
+- Exit status 0 means delivered. Anything else is logged, and the watchdog
+  does not count an undelivered overdue alert as sent. Neither does a `NOTIFY`
+  that names no known backend, such as the typo `desktop,command`.
+- The command gets 30 seconds, and its output is discarded: it may echo a
+  secret, and the log is not private.
+- `NOTIFY_COMMAND` is an absolute path (or `~/…`) to an executable file,
+  nothing more: no arguments, no shell. Its credentials live in its own files,
+  not in `backup.conf`.
+
+```
+NOTIFY=desktop command
+NOTIFY_COMMAND=~/bin/notify-phone.sh
+```
+
+Two starting points:
+
+- **ntfy** — [`examples/notify-ntfy.sh`](examples/notify-ntfy.sh) publishes to
+  an [ntfy](https://ntfy.sh) topic with `curl` alone, reading `NTFY_URL` and an
+  optional `NTFY_TOKEN` from `~/.config/proton-drive-backup/ntfy.conf`. Critical
+  messages are sent at high priority, the others at low priority, silent on a
+  phone. `ntfy.conf` follows the same rules as `backup.conf`. Link it into
+  place: `ln -s "$PWD/examples/notify-ntfy.sh" ~/bin/notify-ntfy.sh`.
+  Messages carry folder names and paths: on a public server such as ntfy.sh,
+  anyone who knows the topic reads them, so pick a name nobody would guess, or
+  a server of your own.
+- **[Apprise](https://github.com/caronc/apprise)**, which speaks to a hundred
+  services, from its default configuration file:
+
+  ```sh
+  #!/bin/sh
+  [ "$1" = critical ] && type=failure || type=info
+  exec apprise -n "$type" -t "$2" -b "$3"
+  ```
 
 ### Mappings
 
@@ -128,8 +178,8 @@ Back up now? [y/N] (no answer within 300s = no)
 ```
 
 `-y, --yes` skips the question altogether, for a scripted or headless run.
-Progress is otherwise silent by design: on a terminal the desktop
-notifications are mirrored to stderr, so a CLI run still reports its outcome.
+Progress is otherwise silent by design: on a terminal the notifications are
+mirrored to stderr, so a CLI run still reports its outcome.
 
 | | |
 |---|---|
@@ -148,7 +198,7 @@ notifications are mirrored to stderr, so a CLI run still reports its outcome.
 | `proton-drive-backup-check.timer` | Fires at 13:00, an hour after the backup window so the result is judged on a finished run. |
 | `proton-drive-backup-check.sh` | Alerts when no backup has **succeeded** for 3 days. |
 | `proton-drive-find.sh` | Searches the remote tree by name, or by content with `--have`. Manual, read-only, no timer. |
-| `lib/common.sh` | Used by `proton-drive-backup.sh`: reads `backup.conf`. |
+| `lib/common.sh` | Shared by `proton-drive-backup.sh` and the watchdog: reads `backup.conf`, sends notifications. |
 
 Both timers carry `RandomizedDelaySec=5min`, so the actual firing is spread
 over the five minutes that follow — a run starting at 12:04 is normal. On the
