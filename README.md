@@ -286,8 +286,9 @@ searches read from that.
 
 Budget the first walk accordingly: on a Drive of 2 263 folders and 68 367
 nodes it took **1 h 35 min** and produced an 8 MB index. A later refresh of the
-same Drive, grown to 2 388 folders and 70 366 nodes, took 1 h 40 min. Since the
-index gained a size and a digest column it weighs around 11 MB. Searches
+same Drive, grown to 2 388 folders and 70 366 nodes, took 1 h 40 min, and one
+of 2 736 folders and 72 025 nodes 1 h 38 min with CLI 0.9.0. Since the index
+gained a size and a digest column it weighs around 11 MB. Searches
 against it return in about 60 ms.
 
 ```bash
@@ -351,6 +352,29 @@ Two details that both bite: `filesystem download` takes the remote paths
 passes the destination as the first path and the CLI answers
 `EACCES … mkdir /my-files`. And remote paths routinely contain spaces, hence
 `-d '\n'` rather than the default word splitting.
+
+`--trash` shows where the trash sits, per top-level folder of `--path`
+(default `/my-files`). It needs CLI 0.9.0 and a fresh index:
+
+```bash
+proton-drive-find.sh --trash
+```
+
+```
+  index from 2026-10-07 08:47
+
+     items      size  folder
+     12090      1.2G  /my-files
+     11804      399M  /my-files/drive
+       240       17M  /my-files/papers
+
+  Freed by: proton-drive filesystem empty-trash (irreversible)
+```
+
+The first line is the whole subtree, the others its folders, largest first.
+It costs one `filesystem size` call per top-level folder — 4 minutes on the
+Drive above, seconds with `--path` on a single folder. See *Trashed nodes stay
+under their parent* below for how the figure is obtained.
 
 Note that anything backed up *from this machine* is already local, where `find`
 is faster. Remote search earns its keep on what did not come from here: uploads
@@ -481,6 +505,14 @@ what makes `--have` possible. Note `sha1Verified: false` in the CLI's output:
 the digest is claimed by whichever client uploaded the revision, not recomputed
 server-side. For "did this file come from here?" that is precisely the right
 guarantee; it is not a defence against a tampered server.
+
+**Trashed nodes stay under their parent.** `filesystem list` hides a trashed
+node, but `filesystem size` — added in CLI 0.9.0 — still counts it under the
+folder it was deleted from: "all active and trashed descendants". The index
+holds only the active ones, so the difference between the two, in nodes and in
+stored bytes, is the trash. That is why `--trash` needs a fresh index: a node
+deleted since the last refresh is still counted as active, and a figure that
+comes out negative is skipped with a pointer to `--refresh` rather than shown.
 
 **A truncated index is worse than none.** The walk writes to a temporary file
 and moves it into place at the end, so a run interrupted halfway leaves the

@@ -2,7 +2,7 @@
 #
 # Searches Proton Drive by name.
 #
-# The CLI (0.8.0) has no search command: the only way to find a file is to walk
+# The CLI (0.9.0) has no search command: the only way to find a file is to walk
 # the remote tree with `filesystem list` and match locally. One API call per
 # folder, around 1.5 s each, which makes a live walk far too slow to repeat.
 # Results are therefore cached in an index and searches read from that.
@@ -50,6 +50,9 @@ Options:
                     `proton-drive filesystem download`.
       --have FILE...  Answer whether each local FILE is already on the Drive,
                     by content rather than by name. Reads the index only.
+      --trash       Show how much of the subtree (-p, default /my-files) sits
+                    in the trash, per top-level folder. Needs a fresh index;
+                    takes minutes on a large Drive.
   -h, --help        This help.
 
 The index lives in ~/.local/state/proton-drive-backup/index.tsv and is never
@@ -60,6 +63,11 @@ returns at no extra cost. --have hashes a local file and looks it up in that
 column: a rename on either side changes nothing, and no download is needed.
 An index built before this column existed has to be refreshed once for --have
 to work.
+
+Trash: a trashed node keeps counting under its former parent, invisible to
+`filesystem list` but included by `filesystem size` (CLI 0.9.0+). --trash
+subtracts the indexed, active nodes from that total; the remainder is what
+`proton-drive filesystem empty-trash` would free. A stale index skews it.
 
 Photos: images under /photos cannot be searched. `photo timeline` returns UIDs
 and capture times but no names, and the CLI rejects a UID as a path. Only the
@@ -73,6 +81,7 @@ LIVE=0
 ALL=0
 PATHS_ONLY=0
 HAVE=0
+TRASH=0
 TYPE=""
 ROOT=""
 declare -a TERMS=()
@@ -84,6 +93,7 @@ while [ $# -gt 0 ]; do
         -a|--all)     ALL=1 ;;
         --paths)      PATHS_ONLY=1 ;;
         --have)       HAVE=1 ;;
+        --trash)      TRASH=1 ;;
         -p|--path)
             [ $# -ge 2 ] || { echo "Missing value for $1" >&2; exit 2; }
             ROOT="${2%/}"; shift
@@ -105,7 +115,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 
-if [ ${#TERMS[@]} -eq 0 ] && [ "$REFRESH" -eq 0 ]; then
+if [ ${#TERMS[@]} -eq 0 ] && [ "$REFRESH" -eq 0 ] && [ "$TRASH" -eq 0 ]; then
     usage >&2
     exit 2
 fi
@@ -355,6 +365,74 @@ have_files() {
     return $rc
 }
 
+# --- Trash report -------------------------------------------------------------
+# `filesystem size` counts active and trashed descendants alike; the index holds
+# only the active ones. The difference, per folder, is the trash left behind.
+# One API call per top-level folder, each walking its subtree server-side:
+# minutes on a large Drive (4 min for 72,000 nodes), seconds on a small subtree.
+trash_report() {
+    local root="${ROOT:-$DEFAULT_ROOT}" dir out size total count stored
+    local items bytes stale=0 failed=0
+    local -a rows=()
+
+    need_session
+
+    # One pass over the index: active count and stored bytes for the root and
+    # for each of its direct child folders.
+    declare -A icount=() ibytes=()
+    while IFS=$'\t' read -r dir count stored; do
+        icount[$dir]=$count; ibytes[$dir]=$stored
+    done < <(awk -F'\t' -v r="$root" '
+        $2 == "folder" && index($1, r "/") == 1 && index(substr($1, length(r) + 2), "/") == 0 {
+            kids[$1] = 1
+        }
+        index($1, r "/") == 1 {
+            c[r]++; b[r] += $3
+            rest = substr($1, length(r) + 2)
+            k = r "/" (index(rest, "/") ? substr(rest, 1, index(rest, "/") - 1) : rest)
+            if (k != $1) { c[k]++; b[k] += $3 }
+        }
+        END {
+            printf "%s\t%d\t%.0f\n", r, c[r], b[r]
+            for (k in kids) printf "%s\t%d\t%.0f\n", k, c[k], b[k]
+        }' "$INDEX")
+
+    for dir in "${!icount[@]}"; do
+        if ! out="$("$PROTON_DRIVE" filesystem size --json "$dir" 2>&1)" ||
+           ! size="$(printf '%s' "$out" | jq -er '.size' 2>/dev/null)" ||
+           ! total="$(printf '%s' "$out" | jq -er '.numberOfDescendants' 2>/dev/null)"; then
+            printf '  WARN: cannot size %s: %s\n' "$dir" "${out%%$'\n'*}" >&2
+            failed=1
+            continue
+        fi
+        items=$(( total - icount[$dir] ))
+        bytes=$(( size - ibytes[$dir] ))
+        # Negative means the index lists nodes the Drive no longer has.
+        if [ "$items" -lt 0 ] || [ "$bytes" -lt 0 ]; then
+            stale=1
+            continue
+        fi
+        [ "$items" -gt 0 ] && rows+=("$bytes"$'\t'"$items"$'\t'"$dir")
+    done
+
+    if [ ${#rows[@]} -eq 0 ] && [ "$failed" -eq 0 ]; then
+        printf '  Nothing in the trash under %s.\n\n' "$root"
+    elif [ ${#rows[@]} -gt 0 ]; then
+        printf '  %8s  %8s  %s\n' "items" "size" "folder"
+        printf '%s\n' "${rows[@]}" | sort -t$'\t' -k1,1nr |
+            while IFS=$'\t' read -r bytes items dir; do
+                printf '  %8d  %8s  %s\n' "$items" \
+                    "$(numfmt --to=iec "$bytes" 2>/dev/null || echo "$bytes")" "$dir"
+            done
+        printf '\n  Freed by: proton-drive filesystem empty-trash (irreversible)\n\n'
+    fi
+    if [ "$stale" -eq 1 ]; then
+        echo "  Some folders were skipped: the index is out of date. Run --refresh." >&2
+        return 1
+    fi
+    [ "$failed" -eq 0 ]
+}
+
 # --- Live search --------------------------------------------------------------
 if [ "$LIVE" -eq 1 ]; then
     need_session
@@ -373,7 +451,7 @@ if [ "$HAVE" -eq 1 ]; then
     exit $?
 fi
 
-if [ ${#TERMS[@]} -eq 0 ]; then
+if [ ${#TERMS[@]} -eq 0 ] && [ "$TRASH" -eq 0 ]; then
     exit 0   # --refresh on its own
 fi
 
@@ -413,6 +491,11 @@ if [ -n "$ROOT" ] && [ -n "$INDEX_ROOTS" ]; then
             "$ROOT" "$INDEX_ROOTS" >&2
         printf '           Refresh with: --refresh --path %s\n\n' "$ROOT" >&2
     fi
+fi
+
+if [ "$TRASH" -eq 1 ]; then
+    trash_report
+    exit $?
 fi
 
 filter_prefix "$ROOT" < "$INDEX" | filter_type | match_terms "${TERMS[@]}" | render
