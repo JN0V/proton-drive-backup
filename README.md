@@ -245,7 +245,7 @@ desktop keychain by default, which a headless host does not have. Its
 | Value | Where | |
 |---|---|---|
 | `keychain` | desktop secret service | Default. Needs a desktop session. |
-| `unsafe_file` | `~/.local/share/proton-drive-cli/auth-session.json`, mode 600 | In clear: anyone who can read the file holds the session. Nothing to unlock, so it survives reboots. |
+| `unsafe_file` | `~/.local/share/proton-drive-cli/auth-session.json` | In clear: anyone who can read the file holds the session. Nothing to unlock, so it survives reboots. The CLI creates it with your umask — 664 under Debian's default — so restrict it after signing in (below). |
 | `pass` | [`pass`](https://www.passwordstore.org/), entry `ch.proton.drive/drive-sdk-cli/auth-session` | Encrypted with GPG. An unattended run needs `gpg-agent` to hold the key unlocked — by default for only 10 minutes after its last use — or a key without a passphrase, which is hardly safer than `unsafe_file`. A locked key is likely to be reported as a session to sign in again. |
 
 The variable has to reach both the timers and your shell — `auth login` writes
@@ -263,7 +263,13 @@ echo 'export PROTON_DRIVE_CREDENTIALS_STORE=unsafe_file' >> ~/.profile
 ```
 
 Then sign in. `auth login` prints a link: open it in a browser on any other
-device.
+device. With `unsafe_file`, restrict the session file right after — the CLI
+keeps its mode when it rewrites the file later:
+
+```bash
+proton-drive auth login
+chmod 600 ~/.local/share/proton-drive-cli/auth-session.json
+```
 
 **Notifications need a command.** `notify-send` reaches nobody without a
 desktop: set `NOTIFY=command` and a [notification command](#notification-command).
