@@ -526,6 +526,16 @@ Upload only. Nothing is pulled back down, and a local deletion does not remove
 the remote copy. Renaming or deleting a *file* leaves an orphan on the Drive
 side. This is not a mirror.
 
+To get everything back, CLI 0.9.0 has `proton-drive takeout run`: a read-only
+export of the account into a local folder, with a manifest. Nothing is exported
+unless you pick sections with `--include` — `my-files`, `devices`, `photos`,
+and `revisions` for the older versions of files that `create-new-revision`
+keeps. Proton Docs and Sheets are not exported yet.
+
+```bash
+proton-drive takeout run --include my-files --include revisions ~/proton-takeout
+```
+
 For true bidirectional sync: wait for Proton's Linux desktop client, or use
 [rclone](https://rclone.org/protondrive/) (its `protondrive` backend has known
 limitations around non-interactive 2FA and does not handle modification times).
