@@ -7,7 +7,7 @@ by content.
 
 ## Why this exists
 
-The Proton Drive CLI (v0.8.0) does **not** do continuous synchronisation: it
+The Proton Drive CLI (v0.9.0) does **not** do continuous synchronisation: it
 runs one operation and exits. There is also no Linux desktop client yet — Proton
 has announced one for late 2026. This repository builds the scheduling,
 confirmation and monitoring layer that is missing around the CLI.
@@ -19,7 +19,8 @@ It is a **backup** tool, not a sync engine. See [Limitations](#limitations).
 - The official [Proton Drive CLI](https://proton.me/blog/proton-drive-cli)
   **0.8.0 or later** at `~/bin/proton-drive`, signed in via
   `proton-drive auth login`. Earlier versions are refused: 0.8.0 renamed the
-  conflict strategies the backup relies on.
+  conflict strategies the backup relies on. `proton-drive-find.sh --trash`
+  needs 0.9.0.
 - `systemd` user session, and `jq` for `proton-drive-find.sh`
 - On a desktop: `libnotify` (`notify-send`), and `zenity` for the graphical
   prompt — a terminal-only run does without it
